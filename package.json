@@ -3,8 +3,9 @@
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 && electron .\"",
+    "dev:e2e": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "lint": "eslint . --max-warnings=0", "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run tests/unit", "test:integration": "vitest run tests/integration", "test:e2e": "playwright test",
+    "test": "vitest run --root . tests/unit", "test:integration": "vitest run --root . tests/integration", "test:e2e": "playwright test",
     "build": "vite build && tsc -p tsconfig.electron.json", "package": "pnpm build && electron-builder --linux dir",
     "package:win": "pnpm build && electron-builder --win nsis --x64", "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build"
   },
