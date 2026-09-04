@@ -4,7 +4,10 @@ async function mockPreload(page: Page) {
   await page.addInitScript(() => {
     const rows: any[] = [];
     (window as any).damplanner = {
-      list: async () => rows,
+      // Return a fresh array like the real IPC boundary would after deserialization.
+      // Returning the mutable `rows` reference prevents React from re-rendering
+      // after save/remove because setRows would receive the same object identity.
+      list: async () => [...rows],
       settings: async () => ({
         timezone: 'Europe/Paris', googleDefaultCalendarId: 'primary', googleAvailabilityCalendarIds: ['primary'],
         twitchClientId: 'test', availabilityLocal: true, availabilityGoogle: false, availabilityTwitch: false,
