@@ -2,7 +2,7 @@
   "name": "damplanner", "version": "0.1.0", "private": true, "type": "module", "packageManager": "pnpm@10.28.1",
   "main": "dist-electron/main/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "node -e \"require('fs').rmSync('dist-electron',{recursive:true,force:true})\" && tsc -p tsconfig.electron.json && concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 file:dist-electron/main/main.js && electron .\"",
     "dev:e2e": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "lint": "eslint . --max-warnings=0", "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --root . tests/unit", "test:integration": "vitest run --root . tests/integration", "test:e2e": "playwright test",
