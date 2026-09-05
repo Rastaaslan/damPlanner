@@ -32,6 +32,11 @@ const eventBaseSchema = z.object({
   twitchCategoryBoxArtUrl: z.string().nullable().default(null),
   conflictOverrideHash: z.string().nullable().default(null),
   conflictOverrideAt: z.string().datetime().nullable().default(null),
+  status: z.enum(['DRAFT','PUBLISHED']).default('PUBLISHED'),
+  bufferBeforeMinutes: z.number().int().min(0).max(1440).nullable().default(null),
+  bufferAfterMinutes: z.number().int().min(0).max(1440).nullable().default(null),
+  checklist: z.array(z.object({id:z.string(),label:z.string().min(1),done:z.boolean()})).default([]),
+  recurrence: z.object({frequency:z.enum(['DAILY','WEEKLY']),interval:z.number().int().min(1).max(365),weekdays:z.array(z.number().int().min(1).max(7)).default([]),until:z.string().datetime().nullable().default(null),count:z.number().int().min(1).max(500).nullable().default(null)}).nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   deletedAt: z.string().datetime().nullable().default(null),
@@ -83,7 +88,9 @@ function refineEvent(value: EventRefinementValue, context: z.RefinementCtx) {
 }
 
 export const eventSchema = eventBaseSchema.superRefine(refineEvent);
-export type PlannerEvent = z.infer<typeof eventSchema>;
+// Input typing keeps additive fields optional for records created before the
+// daily-hub migration; parsing still materialises every default at runtime.
+export type PlannerEvent = z.input<typeof eventSchema>;
 
 export interface EventPublication {
   eventId: string;
@@ -116,4 +123,7 @@ export const eventInputSchema = eventBaseSchema
   })
   .superRefine(refineEvent);
 
-export type EventInput = z.infer<typeof eventInputSchema>;
+export type EventInput = z.input<typeof eventInputSchema>;
+
+export const templateSchema=z.object({id:z.string().uuid(),name:z.string().trim().min(1),kind:z.enum(['LIVE','PERSONAL']),durationMinutes:z.number().int().min(1).max(1440),description:z.string().default(''),syncGoogle:z.boolean().default(false),syncTwitch:z.boolean().default(false),twitchTitle:z.string().nullable().default(null),twitchCategoryId:z.string().nullable().default(null),twitchCategoryName:z.string().nullable().default(null),bufferBeforeMinutes:z.number().int().min(0).nullable().default(null),bufferAfterMinutes:z.number().int().min(0).nullable().default(null),checklist:z.array(z.string().min(1)).default([])});
+export type EventTemplate=z.infer<typeof templateSchema>;
