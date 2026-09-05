@@ -45,3 +45,9 @@ par occurrence.
 Les appels passent par le preload et chaque payload IPC est validé par Zod. Les événements
 externes ne transportent aucun jeton. OAuth demeure dans le main process et les jetons sont
 uniquement dans `safeStorage`.
+
+## Live Cockpit
+
+Un LIVE peut ouvrir un Cockpit persistant avec routine par phases, progression, actions
+locales sécurisées et lifecycle prévu/réel. Voir [LIVE_COCKPIT.md](LIVE_COCKPIT.md),
+[ROUTINES.md](ROUTINES.md) et [LOCAL_ACTIONS.md](LOCAL_ACTIONS.md).

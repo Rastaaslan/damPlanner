@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DateTime } from 'luxon';
-import type { EventInput, EventPublication, EventTemplate, PlannerEvent } from '../domain/models';
+import type { EventInput, EventPublication, EventTemplate, LiveRoutine, PlannerEvent } from '../domain/models';
 import type { CalendarItem } from '../domain/calendar';
 import { freeSlots } from '../domain/calendar';
 import './style.css';
@@ -143,6 +143,18 @@ function EventForm({ editing, prefill, settings, onDone, onCancel }: {
       bufferAfterMinutes: editing?.bufferAfterMinutes ?? null,
       checklist,
       recurrence: editing?.recurrence ?? null,
+      lifecycleState: editing?.lifecycleState ?? 'PLANNED',
+      actualStartAt: editing?.actualStartAt ?? null,
+      actualEndAt: editing?.actualEndAt ?? null,
+      routineId: editing?.routineId ?? null,
+      routineSteps: editing?.routineSteps ?? [],
+      tags: editing?.tags ?? [],
+      participantIds: editing?.participantIds ?? [],
+      travelBeforeMinutes: editing?.travelBeforeMinutes ?? 0,
+      travelAfterMinutes: editing?.travelAfterMinutes ?? 0,
+      postLiveMood: editing?.postLiveMood ?? null,
+      postLiveNote: editing?.postLiveNote ?? '',
+      highlights: editing?.highlights ?? [],
     };
     try {
       setBusy(true);
@@ -225,7 +237,7 @@ function EventForm({ editing, prefill, settings, onDone, onCancel }: {
   </section>;
 }
 
-function ItemCard({ item, onEdit, onReload }: { item: CalendarItem; onEdit: (id: string) => void; onReload: () => void }) {
+function ItemCard({ item, onEdit, onReload, onPrepare }: { item: CalendarItem; onEdit: (id: string) => void; onReload: () => void; onPrepare?: (id: string) => void }) {
   async function adopt() {
     if (!item.externalId || !confirm(`Gérer « ${item.title} » dans DamPlanner ?`)) return;
     await window.damplanner.adopt({ id: item.externalId, calendarId: item.calendarId });
@@ -265,6 +277,7 @@ function ItemCard({ item, onEdit, onReload }: { item: CalendarItem; onEdit: (id:
       </>}
     </div>
     <div className="row-actions">
+      {item.kind === 'LIVE' && item.editable && onPrepare && <button className="primary" onClick={() => onPrepare(item.localEventId!)}>Préparer le live</button>}
       {item.editable && <button onClick={() => onEdit(item.localEventId!)}>Modifier</button>}
       {item.draft && <button onClick={publishDraft}>Publier</button>}
       {item.editable && <button onClick={async () => { const start = DateTime.fromISO(item.startAtUtc).plus({ weeks: 1 }); const end = DateTime.fromISO(item.endAtUtc).plus({ weeks: 1 }); await window.damplanner.duplicate(item.localEventId!, start.toISO()!, end.toISO()!); onReload(); }}>Dupliquer</button>}
@@ -387,6 +400,62 @@ function Today({ items, zone, onEdit, onReload }: { items: CalendarItem[]; zone:
   </>;
 }
 
+function Cockpit({ event, onReload, onClose }: { event: PlannerEvent; onReload: () => Promise<void>; onClose: () => void }) {
+  const [routines, setRoutines] = useState<LiveRoutine[]>([]);
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    void window.damplanner.cockpitData().then((value: { routines: LiveRoutine[] }) => setRoutines(value.routines));
+  }, []);
+  const checks = (event.routineSteps ?? []).filter(step => step.type === 'CHECK');
+  const done = checks.filter(step => step.done).length;
+  const total = checks.length;
+  const percent = total ? Math.round(done / total * 100) : 100;
+
+  async function state(value: NonNullable<PlannerEvent['lifecycleState']>) {
+    if ((value === 'READY' || value === 'LIVE') && done < total && !confirm(`${total - done} étapes sont encore incomplètes. Continuer quand même ?`)) return;
+    await window.damplanner.setLifecycle(event.id, value);
+    await onReload();
+  }
+
+  async function execute(targetId: string) {
+    try {
+      setMessage('');
+      await window.damplanner.executeAction(targetId);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  return <section className="cockpit">
+    <button onClick={onClose}>← Retour</button>
+    <small>LIVE COCKPIT</small>
+    <h1>{event.title}</h1>
+    <p>{DateTime.fromISO(event.startAtUtc).toFormat('HH:mm')} → {DateTime.fromISO(event.endAtUtc).toFormat('HH:mm')} · État : <b>{event.lifecycleState ?? 'PLANNED'}</b></p>
+    {event.actualStartAt && <p>Début réel : {DateTime.fromISO(event.actualStartAt).toFormat('HH:mm')}{event.actualEndAt ? ` · Fin réelle : ${DateTime.fromISO(event.actualEndAt).toFormat('HH:mm')}` : ''}</p>}
+    {!(event.routineSteps?.length) && <label>Routine <select defaultValue="" onChange={async change => { if (change.target.value) { await window.damplanner.attachRoutine(event.id, change.target.value); await onReload(); } }}><option value="">Choisir…</option>{routines.map(routine => <option key={routine.id} value={routine.id}>{routine.name}</option>)}</select></label>}
+    <div className="progress"><span style={{ width: `${percent}%` }} /></div>
+    <h2>Préparation : {done}/{total} · {percent}%</h2>
+    {(['BEFORE', 'DURING', 'AFTER'] as const).map(phase => <div className="routine-phase" key={phase}>
+      <h3>{phase === 'BEFORE' ? 'AVANT' : phase === 'DURING' ? 'PENDANT' : 'APRÈS'}</h3>
+      {(event.routineSteps ?? []).filter(step => step.phase === phase).map(step => <div className="routine-step" key={step.id}>
+        {step.type === 'CHECK'
+          ? <label><input type="checkbox" checked={step.done ?? false} onChange={async change => { await window.damplanner.checkRoutine(event.id, step.id, change.target.checked); await onReload(); }} /> {step.label}</label>
+          : step.targetId
+            ? <button onClick={() => execute(step.targetId!)}>▶ {step.label}</button>
+            : <span>{step.label}</span>}
+      </div>)}
+    </div>)}
+    {message && <p className="error">{message}</p>}
+    <div className="actions">
+      <button onClick={async () => { if (!done || confirm('Réinitialiser la checklist ?')) { await window.damplanner.resetRoutine(event.id); await onReload(); } }}>Réinitialiser la checklist</button>
+      <button onClick={() => state('READY')}>Marquer prêt</button>
+      <button className="primary" onClick={() => state('LIVE')}>Je suis en live</button>
+      <button onClick={() => state('FINISHED')}>Terminer le live</button>
+    </div>
+    {event.lifecycleState === 'FINISHED' && <textarea placeholder="Comment ça s’est passé ?" defaultValue={event.postLiveNote ?? ''} onBlur={change => void window.damplanner.savePostLive(event.id, event.postLiveMood ?? null, change.target.value)} />}
+  </section>;
+}
+
 function SettingsView({ value, reload }: { value: Settings; reload: () => Promise<void> }) {
   const [settings, setSettings] = useState(value);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
@@ -394,8 +463,12 @@ function SettingsView({ value, reload }: { value: Settings; reload: () => Promis
   const [message, setMessage] = useState('');
   const [templates, setTemplates] = useState<EventTemplate[]>([]);
   const [templateName, setTemplateName] = useState('');
+  const [routines, setRoutines] = useState<LiveRoutine[]>([]);
 
-  useEffect(() => { void window.damplanner.templates().then((values: EventTemplate[]) => setTemplates(values)); }, []);
+  useEffect(() => {
+    void window.damplanner.templates().then((values: EventTemplate[]) => setTemplates(values));
+    void window.damplanner.cockpitData().then((value: { routines: LiveRoutine[] }) => setRoutines(value.routines));
+  }, []);
 
   async function action(work: () => Promise<unknown>, success = 'Opération réussie') {
     try {
@@ -420,10 +493,26 @@ function SettingsView({ value, reload }: { value: Settings; reload: () => Promis
       id: crypto.randomUUID(), name, kind: 'LIVE', durationMinutes: 180, description: '', syncGoogle: true, syncTwitch: true,
       twitchTitle: null, twitchCategoryId: null, twitchCategoryName: null, bufferBeforeMinutes: settings.liveBufferBefore,
       bufferAfterMinutes: settings.liveBufferAfter, checklist: ['OBS lancé', 'Micro vérifié', 'Titre vérifié', 'Catégorie Twitch correcte'],
+      routineId: null, tags: [], participantIds: [], reminderMinutes: null, color: null,
     };
     await window.damplanner.saveTemplate(template);
     setTemplates(await window.damplanner.templates() as EventTemplate[]);
     setTemplateName('');
+  }
+
+  async function addStandardRoutine() {
+    const now = new Date().toISOString();
+    const routine: LiveRoutine = {
+      id: crypto.randomUUID(),
+      name: 'Routine Live standard',
+      createdAt: now,
+      updatedAt: now,
+      steps: ['Micro vérifié', 'Caméra vérifiée', 'Scène OBS prête', 'Titre Twitch vérifié', 'Boisson prête'].map(label => ({ id: crypto.randomUUID(), type: 'CHECK' as const, phase: 'BEFORE' as const, label, targetId: null })),
+    };
+    await window.damplanner.saveRoutine(routine);
+    const data = await window.damplanner.cockpitData() as { routines: LiveRoutine[] };
+    setRoutines(data.routines);
+    setMessage('Routine standard créée');
   }
 
   return <section className="panel settings">
@@ -468,6 +557,11 @@ function SettingsView({ value, reload }: { value: Settings; reload: () => Promis
     <div className="actions"><input value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Nom du modèle LIVE…" /><button onClick={addTemplate}>Créer un modèle</button></div>
     {templates.map(template => <div className="template-row" key={template.id}><span><b>{template.name}</b> · {template.durationMinutes} min · {template.kind}</span><button onClick={async () => { await window.damplanner.deleteTemplate(template.id); setTemplates(await window.damplanner.templates() as EventTemplate[]); }}>Supprimer</button></div>)}
 
+    <h2>Routines</h2>
+    <p>Créez une routine standard puis attachez-la depuis le Live Cockpit.</p>
+    <button onClick={addStandardRoutine}>+ Routine Live standard</button>
+    {routines.map(routine => <div className="template-row" key={routine.id}><span><b>{routine.name}</b> · {routine.steps.length} étape(s)</span><button onClick={async () => { await window.damplanner.deleteRoutine(routine.id); const data = await window.damplanner.cockpitData() as { routines: LiveRoutine[] }; setRoutines(data.routines); }}>Supprimer</button></div>)}
+
     <h2>Windows</h2>
     <label><input type="checkbox" checked={settings.notificationsEnabled} onChange={event => setSettings({ ...settings, notificationsEnabled: event.target.checked })} />Notifications activées</label>
     <label>Rappel LIVE (min)<input type="number" min="0" value={settings.liveReminderMinutes} onChange={event => setSettings({ ...settings, liveReminderMinutes: Number(event.target.value) })} /></label>
@@ -486,7 +580,7 @@ function SettingsView({ value, reload }: { value: Settings; reload: () => Promis
 function App() {
   const [settings, setSettings] = useState(defaults);
   const [hub, setHub] = useState<Hub>({ items: [], rows: [], warnings: [], fetchedAt: Date.now(), fromCache: false });
-  const [view, setView] = useState<'today' | 'planning' | 'agenda' | 'form' | 'settings'>('today');
+  const [view, setView] = useState<'today' | 'planning' | 'agenda' | 'form' | 'settings' | 'cockpit'>('today');
   const [editing, setEditing] = useState<PlannerEvent>();
   const [prefill, setPrefill] = useState<Prefill>();
   const [query, setQuery] = useState('');
@@ -538,6 +632,24 @@ function App() {
     setView('form');
   }
 
+  async function openPrepare(id: string) {
+    try {
+      const saved = await window.damplanner.setLifecycle(id, 'PREPARING') as PlannerEvent;
+      setEditing(saved);
+      setView('cockpit');
+      await load(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function refreshCockpit() {
+    await load(true);
+    if (!editing) return;
+    const rows = await window.damplanner.list() as Row[];
+    setEditing(rows.find(row => row.event.id === editing.id)?.event);
+  }
+
   async function move(item: CalendarItem, startAtUtc: string, endAtUtc: string) {
     const row = hub.rows.find(value => value.event.id === item.localEventId);
     if (!row) return;
@@ -556,6 +668,7 @@ function App() {
     <main>
       {error && <p className="error">{error}</p>}
       {view === 'form' && <EventForm editing={editing} prefill={prefill} settings={settings} onCancel={() => setView('planning')} onDone={async () => { await load(true); setView('planning'); }} />}
+      {view === 'cockpit' && editing && <Cockpit event={editing} onClose={() => setView('today')} onReload={refreshCockpit} />}
       {view === 'settings' && <SettingsView value={settings} reload={() => load()} />}
       {view === 'today' && <Today items={shown} zone={settings.timezone} onEdit={openEdit} onReload={() => void load(true)} />}
       {view === 'agenda' && <Agenda items={shown} zone={settings.timezone} onCreate={value => { setPrefill(value); setEditing(undefined); setView('form'); }} onEdit={openEdit} onMove={move} />}
@@ -565,7 +678,7 @@ function App() {
         <div className="search"><input aria-label="Rechercher" placeholder="Rechercher…" value={query} onChange={event => setQuery(event.target.value)} /></div>
         <div className="filters">{['Tous', 'LIVE', 'Personnel', 'Brouillons', 'DamPlanner', 'Google', 'Twitch', 'Synchronisés', 'Erreurs'].map(value => <button className={filter === value ? 'active' : ''} key={value} onClick={() => setFilter(value)}>{value}</button>)}</div>
         {shown.length === 0 && <section className="empty"><h2>Rien à afficher</h2><p>Modifiez les filtres ou créez un événement.</p></section>}
-        {shown.map(item => <ItemCard key={item.id} item={item} onReload={() => void load(true)} onEdit={openEdit} />)}
+        {shown.map(item => <ItemCard key={item.id} item={item} onReload={() => void load(true)} onEdit={openEdit} onPrepare={openPrepare} />)}
       </>}
     </main>
   </>;

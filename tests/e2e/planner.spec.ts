@@ -34,6 +34,14 @@ async function mockPreload(page: Page) {
       remove: async (id: string) => { const index = rows.findIndex(x => x.event.id === id); if (index >= 0) rows.splice(index, 1); },
       retry: async () => {}, publish: async () => ({}), adopt: async () => {}, duplicate: async () => {},
       templates: async () => [], saveTemplate: async () => {}, deleteTemplate: async () => {}, testConnections: async () => ({ google: { connected: true, calendars: 1 }, twitch: { connected: true, schedule: true } }),
+      cockpitData: async () => ({ routines: [], participants: [], tags: [], targets: [] }),
+      saveRoutine: async () => {}, deleteRoutine: async () => {}, attachRoutine: async () => {}, checkRoutine: async () => {}, resetRoutine: async () => {},
+      savePostLive: async () => {}, saveParticipant: async () => {}, saveTag: async () => {}, saveAction: async () => {}, chooseActionPath: async () => null, executeAction: async () => {},
+      setLifecycle: async (id: string, state: string) => {
+        const row = rows.find(x => x.event.id === id);
+        if (row) row.event = { ...row.event, lifecycleState: state, actualStartAt: state === 'LIVE' ? new Date().toISOString() : row.event.actualStartAt, actualEndAt: state === 'FINISHED' ? new Date().toISOString() : row.event.actualEndAt };
+        return row?.event;
+      },
       categories: async () => [{ id: '1', name: 'Just Chatting', boxArtUrl: '' }], updateSettings: async () => {},
       importGoogle: async () => true, connectGoogle: async () => {}, disconnectGoogle: async () => {}, calendars: async () => [],
       beginTwitch: async () => ({}), completeTwitch: async () => {}, disconnectTwitch: async () => {}, openExternal: async () => {},
@@ -121,4 +129,15 @@ test('navigation Agenda et Aujourd’hui reste disponible', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Mois' })).toBeVisible();
   await page.getByRole('button', { name: 'Aujourd’hui', exact: true }).first().click();
   await expect(page.getByText('PROCHAIN ÉVÉNEMENT')).toBeVisible();
+});
+
+test('ouvre le Live Cockpit et change le lifecycle', async ({ page }) => {
+  await fill(page, 'Cockpit LIVE');
+  await previewAndSave(page);
+  const card = eventCard(page, 'Cockpit LIVE');
+  await card.getByRole('button', { name: 'Préparer le live' }).click();
+  await expect(page.getByText('LIVE COCKPIT')).toBeVisible();
+  await expect(page.getByText(/PREPARING/)).toBeVisible();
+  await page.getByRole('button', { name: 'Marquer prêt' }).click();
+  await expect(page.getByText(/READY/)).toBeVisible();
 });

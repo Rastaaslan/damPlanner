@@ -28,3 +28,10 @@ DamPlanner propose désormais les vues **Aujourd'hui**, **Planning** et **Agenda
 et mois) sur une source unifiée locale/Google/Twitch, avec lecture seule stricte des éléments
 externes, déduplication, adoption Google explicite, cache hors connexion et brouillons.
 Voir [docs/AGENDA.md](docs/AGENDA.md) pour les garanties de propriété et limitations.
+
+## Live Cockpit
+
+Depuis un LIVE, **Préparer le live** ouvre une routine persistante par phases et permet de
+marquer l'événement prêt, en direct puis terminé, avec heures réelles et note post-live.
+Les applications et intégrations locales sont exécutées uniquement par des IPC main-process
+restreints, jamais par un shell dans le renderer.
