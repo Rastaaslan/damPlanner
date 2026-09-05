@@ -1,0 +1,34 @@
+import {DateTime} from 'luxon';
+import type {EventPublication,PlannerEvent} from './models.js';
+import type {RemoteSlot} from '../providers/contracts.js';
+
+export type CalendarSource='DAMPLANNER'|'GOOGLE'|'TWITCH';
+export interface CalendarItem{id:string;source:CalendarSource;ownership:'LOCAL'|'EXTERNAL';title:string;description?:string;startAtUtc:string;endAtUtc:string;allDay:boolean;editable:boolean;color?:string;localEventId?:string;externalId?:string;calendarId?:string;calendarName?:string;kind?:'LIVE'|'PERSONAL';draft?:boolean;google?:EventPublication;twitch?:EventPublication;metadata?:Record<string,string|undefined>}
+export interface PlannerRow{event:PlannerEvent;google?:EventPublication;twitch?:EventPublication}
+
+export function mergeCalendarItems(rows:PlannerRow[],google:RemoteSlot[],twitch:RemoteSlot[]):CalendarItem[]{
+  const googleIds=new Set(rows.flatMap(r=>r.google?.externalId?[r.google.externalId,r.google.externalId.split('|').at(-1)!]:[]));
+  const twitchIds=new Set(rows.flatMap(r=>r.twitch?.externalId?[r.twitch.externalId]:[]));
+  const localIds=new Set(rows.map(r=>r.event.id));
+  const local=rows.map(({event,google,twitch}):CalendarItem=>({id:`local:${event.id}`,source:'DAMPLANNER',ownership:'LOCAL',title:event.title,description:event.description,startAtUtc:event.startAtUtc,endAtUtc:event.endAtUtc,allDay:false,editable:true,localEventId:event.id,kind:event.kind,draft:event.status==='DRAFT',google,twitch}));
+  const remoteGoogle=google.filter(x=>!x.damplannerEventId||!localIds.has(x.damplannerEventId)).filter(x=>!googleIds.has(x.id)&&!googleIds.has(`${x.calendarId}|${x.id}`)).map((x):CalendarItem=>({id:`google:${x.calendarId??'primary'}:${x.id}`,source:'GOOGLE',ownership:'EXTERNAL',title:x.title,description:x.description,startAtUtc:x.startAtUtc,endAtUtc:x.endAtUtc,allDay:Boolean(x.allDay),editable:false,externalId:x.id,calendarId:x.calendarId,calendarName:x.calendarName,color:x.color,metadata:{recurringEventId:x.recurringEventId}}));
+  const remoteTwitch=twitch.filter(x=>!twitchIds.has(x.id)).map((x):CalendarItem=>({id:`twitch:${x.id}`,source:'TWITCH',ownership:'EXTERNAL',title:x.title,startAtUtc:x.startAtUtc,endAtUtc:x.endAtUtc,allDay:false,editable:false,externalId:x.id,color:'#9146ff',metadata:{categoryId:x.categoryId,categoryName:x.categoryName}}));
+  return [...local,...remoteGoogle,...remoteTwitch].sort((a,b)=>a.startAtUtc.localeCompare(b.startAtUtc));
+}
+
+export function freeSlots(items:CalendarItem[],day:string,zone:string,minMinutes=30,buffers={before:0,after:0}){
+  const start=DateTime.fromISO(day,{zone}).startOf('day'),end=start.endOf('day');
+  const busy=items.filter(x=>x.endAtUtc>start.toUTC().toISO()!&&x.startAtUtc<end.toUTC().toISO()!).map(x=>({start:DateTime.fromISO(x.startAtUtc).minus({minutes:buffers.before}).toMillis(),end:DateTime.fromISO(x.endAtUtc).plus({minutes:buffers.after}).toMillis()})).sort((a,b)=>a.start-b.start);
+  const merged:{start:number;end:number}[]=[];for(const slot of busy){const last=merged.at(-1);if(last&&slot.start<=last.end)last.end=Math.max(last.end,slot.end);else merged.push({...slot})}
+  const result:{startAtUtc:string;endAtUtc:string;minutes:number}[]=[];let cursor=start.toMillis();for(const slot of merged){const until=Math.min(slot.start,end.toMillis());if(until-cursor>=minMinutes*60000)result.push({startAtUtc:DateTime.fromMillis(cursor).toUTC().toISO()!,endAtUtc:DateTime.fromMillis(until).toUTC().toISO()!,minutes:(until-cursor)/60000});cursor=Math.max(cursor,slot.end)}if(end.toMillis()-cursor>=minMinutes*60000)result.push({startAtUtc:DateTime.fromMillis(cursor).toUTC().toISO()!,endAtUtc:end.toUTC().toISO()!,minutes:(end.toMillis()-cursor)/60000});return result;
+}
+
+export function bufferWarning(candidate:Pick<PlannerEvent,'startAtUtc'|'endAtUtc'|'kind'>,items:CalendarItem[],before:number,after:number){const previous=items.filter(x=>x.endAtUtc<=candidate.startAtUtc).at(-1),next=items.find(x=>x.startAtUtc>=candidate.endAtUtc);const warnings:string[]=[];if(previous){const actual=(Date.parse(candidate.startAtUtc)-Date.parse(previous.endAtUtc))/60000;if(actual<before)warnings.push(`Seulement ${Math.max(0,actual)} min avant cet événement, ${before} min recommandées.`)}if(next){const actual=(Date.parse(next.startAtUtc)-Date.parse(candidate.endAtUtc))/60000;if(actual<after)warnings.push(`Seulement ${Math.max(0,actual)} min après cet événement, ${after} min recommandées.`)}return warnings}
+
+export class TimedCache<T>{private value?:{data:T;fetchedAt:number};constructor(private ttlMs=5*60_000){}get(now=Date.now()){return this.value&&now-this.value.fetchedAt<this.ttlMs?this.value:undefined}stale(){return this.value}set(data:T,now=Date.now()){this.value={data,fetchedAt:now};return this.value}clear(){this.value=undefined}}
+
+export function expandRecurrence(event:PlannerEvent,rangeStart:string,rangeEnd:string){if(!event.recurrence)return[event];const rule=event.recurrence,result:PlannerEvent[]=[],duration=Date.parse(event.endAtUtc)-Date.parse(event.startAtUtc),zone=event.timezone,currentStart=DateTime.fromISO(event.startAtUtc).setZone(zone);let cursor=currentStart,generated=0;while(cursor.toUTC().toISO()!<rangeEnd&&generated<(rule.count??500)){const weekdayOk=rule.frequency==='DAILY'||!rule.weekdays?.length||rule.weekdays.includes(cursor.weekday);if(weekdayOk){generated++;const iso=cursor.toUTC().toISO()!;if(iso>=rangeStart&&(!rule.until||iso<=rule.until))result.push({...event,id:`${event.id}:${iso}`,startAtUtc:iso,endAtUtc:cursor.plus({milliseconds:duration}).toUTC().toISO()!})}if(rule.until&&cursor.toUTC().toISO()!>rule.until)break;cursor=rule.frequency==='DAILY'?cursor.plus({days:rule.interval}):rule.weekdays?.length?cursor.plus({days:1}):cursor.plus({weeks:rule.interval})}return result}
+
+export function parseIcs(text:string,zone='UTC'){
+  if(text.length>2_000_000)throw new Error('Fichier ICS trop volumineux');const unfolded=text.replace(/\r?\n[ \t]/g,''),blocks=[...unfolded.matchAll(/BEGIN:VEVENT\r?\n([\s\S]*?)\r?\nEND:VEVENT/g)].slice(0,1000);return blocks.flatMap((match,index)=>{const lines=match[1]!.split(/\r?\n/),value=(name:string)=>lines.find(x=>x.startsWith(name))?.split(':').slice(1).join(':');const rawStart=value('DTSTART'),rawEnd=value('DTEND'),title=(value('SUMMARY')??'Événement importé').replace(/\\([,;nN\\])/g,(_,x:string)=>x.toLowerCase()==='n'?'\n':x);if(!rawStart||!rawEnd)return[];const parse=(raw:string)=>/^\d{8}$/.test(raw)?DateTime.fromFormat(raw,'yyyyLLdd',{zone}):DateTime.fromFormat(raw.replace(/Z$/,''),"yyyyLLdd'T'HHmmss",{zone:raw.endsWith('Z')?'UTC':zone});const start=parse(rawStart),end=parse(rawEnd);if(!start.isValid||!end.isValid||end<=start)return[];return[{id:value('UID')??`ics-${index}`,title,startAtUtc:start.toUTC().toISO()!,endAtUtc:end.toUTC().toISO()!,allDay:/^\d{8}$/.test(rawStart)}]})
+}
