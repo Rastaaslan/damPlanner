@@ -465,6 +465,7 @@ function lifecycleView(event: PlannerEvent) {
 
 function Cockpit({ event, onReload, onClose, onComplete }: { event: PlannerEvent; onReload: () => Promise<void>; onClose: () => void; onComplete: (message: string) => Promise<void> }) {
   const [routines, setRoutines] = useState<LiveRoutine[]>([]);
+  const [targets, setTargets] = useState<{ id: string; name: string; type: string; enabled: boolean }[]>([]);
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -475,7 +476,7 @@ function Cockpit({ event, onReload, onClose, onComplete }: { event: PlannerEvent
   const [note, setNote] = useState(event.postLiveNote ?? '');
   const [savedNote, setSavedNote] = useState(event.postLiveNote ?? '');
 
-  useEffect(() => { void window.damplanner.cockpitData().then((value: { routines: LiveRoutine[] }) => setRoutines(value.routines)); }, []);
+  useEffect(() => { void window.damplanner.cockpitData().then((value: { routines: LiveRoutine[]; targets: { id: string; name: string; type: string; enabled: boolean }[] }) => { setRoutines(value.routines); setTargets(value.targets); }); }, []);
   useEffect(() => {
     setMood(event.postLiveMood ?? null);
     setNote(event.postLiveNote ?? '');
@@ -515,12 +516,13 @@ function Cockpit({ event, onReload, onClose, onComplete }: { event: PlannerEvent
     } finally { setBusy(false); }
   }
 
-  async function execute(targetId: string) {
+  async function execute(targetId: string, label: string) {
     try {
       setError('');
       await window.damplanner.executeAction(targetId);
+      setFeedback(`✓ Action lancée : ${label}`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(`Impossible d’exécuter ${label}. ${reason instanceof Error ? reason.message : String(reason)}`);
     }
   }
 
@@ -574,9 +576,13 @@ function Cockpit({ event, onReload, onClose, onComplete }: { event: PlannerEvent
       {(event.routineSteps ?? []).filter(step => step.phase === phase).map(step => <div className="routine-step" key={step.id}>
         {step.type === 'CHECK'
           ? <label><input disabled={readOnly} type="checkbox" checked={step.done ?? false} onChange={async change => { await window.damplanner.checkRoutine(event.id, step.id, change.target.checked); await onReload(); }} /> {step.label}</label>
-          : step.targetId
-            ? <button disabled={readOnly} onClick={() => execute(step.targetId!)}>▶ {step.label}</button>
-            : <span>{step.label}</span>}
+          : step.type === 'TEXT' || step.type === 'SEPARATOR'
+            ? <span>{step.label}</span>
+            : step.targetId
+              ? targets.some(target => target.id === step.targetId)
+                ? <button disabled={readOnly} onClick={() => execute(step.targetId!, step.label)}>▶ {step.label}</button>
+                : <span className="warning">⚠ Cible introuvable — reconfigurer dans Réglages</span>
+              : <span className="warning">⚠ Action non configurée</span>}
       </div>)}
     </div>)}
 
@@ -631,6 +637,7 @@ function RoutineEditor({ initial, data, onSaved, onCancel }: { initial?: LiveRou
   const original = useMemo<LiveRoutine>(() => initial ?? { id: crypto.randomUUID(), name: '', createdAt: created, updatedAt: created, steps: [] }, [initial, created]);
   const [draft, setDraft] = useState<LiveRoutine>(structuredClone(original));
   const [error, setError] = useState('');
+  const [targets, setTargets] = useState(data.targets);
   const dirty = JSON.stringify(draft) !== JSON.stringify(original);
 
   function close() { if (!dirty || confirm('Abandonner les modifications ?')) onCancel(); }
@@ -645,10 +652,13 @@ function RoutineEditor({ initial, data, onSaved, onCancel }: { initial?: LiveRou
       return { ...current, steps };
     });
   }
-  async function localTarget(step: RoutineStep) {
+  async function localTarget(step: RoutineStep, selection: 'FILE' | 'DIRECTORY' = 'FILE') {
     try {
-      const value = await window.damplanner.createLocalAction(step.label, step.type as 'OPEN_APP' | 'OPEN_FILE', true) as { id: string } | null;
-      if (value) update(step.id, { targetId: value.id });
+      const value = await window.damplanner.createLocalAction(step.label, step.type as 'OPEN_APP' | 'OPEN_FILE', true, selection) as CockpitTarget | null;
+      if (value) {
+        setTargets(current => [...current.filter(target => target.id !== value.id), value]);
+        update(step.id, { targetId: value.id });
+      }
     } catch (reason) { setError(String(reason)); }
   }
   async function networkTarget(step: RoutineStep) {
@@ -656,14 +666,12 @@ function RoutineEditor({ initial, data, onSaved, onCancel }: { initial?: LiveRou
     if (!url) return;
     const id = crypto.randomUUID();
     try {
-      if (step.type === 'LOCAL_HTTP') {
-        const methodRaw = (prompt('Méthode HTTP : GET ou POST', 'GET') ?? 'GET').toUpperCase();
-        const method = methodRaw === 'POST' ? 'POST' : 'GET';
-        await window.damplanner.saveNetworkAction({ id, name: step.label, type: 'LOCAL_HTTP', url, method, enabled: true });
-      } else {
-        await window.damplanner.saveNetworkAction({ id, name: step.label, type: 'OPEN_URL', url, enabled: true });
-      }
-      update(step.id, { targetId: id });
+      const saved = step.type === 'LOCAL_HTTP'
+        ? await window.damplanner.saveNetworkAction({ id, name: step.label, type: 'LOCAL_HTTP', url, method: ((prompt('Méthode HTTP : GET ou POST', 'GET') ?? 'GET').toUpperCase() === 'POST' ? 'POST' : 'GET'), enabled: true })
+        : await window.damplanner.saveNetworkAction({ id, name: step.label, type: 'OPEN_URL', url, enabled: true });
+      const target = saved as CockpitTarget;
+      setTargets(current => [...current.filter(value => value.id !== target.id), target]);
+      update(step.id, { targetId: target.id });
     } catch (reason) { setError(String(reason)); }
   }
   async function save() {
@@ -682,10 +690,13 @@ function RoutineEditor({ initial, data, onSaved, onCancel }: { initial?: LiveRou
         <label>{step.type === 'TEXT' ? 'Contenu' : step.type === 'SEPARATOR' ? 'Titre du séparateur' : 'Libellé'}<input value={step.label} onChange={change => update(step.id, { label: change.target.value })} /></label>
         <label>Phase<select value={step.phase} onChange={change => update(step.id, { phase: change.target.value as RoutineStep['phase'] })}><option value="BEFORE">Avant</option><option value="DURING">Pendant</option><option value="AFTER">Après</option></select></label>
         {(step.type.startsWith('OPEN_') || step.type === 'LOCAL_HTTP') && <div className="target-picker">
-          <select aria-label="Cible" value={step.targetId ?? ''} onChange={change => update(step.id, { targetId: change.target.value || null })}><option value="">Aucune cible</option>{data.targets.filter(target => target.type === step.type).map(target => <option value={target.id} key={target.id}>{target.name}</option>)}</select>
-          {(step.type === 'OPEN_APP' || step.type === 'OPEN_FILE')
-            ? <button type="button" onClick={() => localTarget(step)}>Choisir {step.type === 'OPEN_APP' ? 'une application' : 'un fichier ou dossier'}</button>
-            : <button type="button" onClick={() => networkTarget(step)}>Configurer l’URL</button>}
+          <select aria-label="Cible" value={step.targetId ?? ''} onChange={change => update(step.id, { targetId: change.target.value || null })}><option value="">Aucune cible</option>{targets.filter(target => target.type === step.type).map(target => <option value={target.id} key={target.id}>{target.name}</option>)}</select>
+          <small>{step.targetId ? `✓ ${targets.find(target => target.id === step.targetId)?.name ?? 'Cible introuvable'}` : 'Cible : Non configurée'}</small>
+          {step.type === 'OPEN_APP'
+            ? <button type="button" onClick={() => localTarget(step)}>Choisir une application</button>
+            : step.type === 'OPEN_FILE'
+              ? <><button type="button" onClick={() => localTarget(step, 'FILE')}>Choisir un fichier</button><button type="button" onClick={() => localTarget(step, 'DIRECTORY')}>Choisir un dossier</button></>
+              : <button type="button" onClick={() => networkTarget(step)}>Configurer l’URL</button>}
         </div>}
         <div className="step-actions">
           <button type="button" aria-label="Monter" onClick={() => move(index, -1)}>↑</button>

@@ -28,7 +28,7 @@ const api = {
   saveParticipant:(value:unknown)=>invoke('participants:save',value),
   saveTag:(value:unknown)=>invoke('tags:save',value),
   saveNetworkAction:(value:unknown)=>invoke('actions:save-network',value),
-  createLocalAction:(name:string,type:'OPEN_APP'|'OPEN_FILE',enabled=true)=>invoke('actions:create-local',{name,type,enabled}),
+  createLocalAction:(name:string,type:'OPEN_APP'|'OPEN_FILE',enabled=true,selection:'FILE'|'DIRECTORY'='FILE')=>invoke('actions:create-local',{name,type,enabled,selection}),
   executeAction:(id:string)=>invoke('actions:execute',id),
   settings: () => invoke('settings:get'),
   updateSettings: (value: Record<string, unknown>) => invoke('settings:update', value),
