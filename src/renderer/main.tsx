@@ -1,11 +1,574 @@
-import React,{useEffect,useMemo,useState}from'react';import{createRoot}from'react-dom/client';import{DateTime}from'luxon';import type{EventInput,EventPublication,PlannerEvent}from'../domain/models';import type{CalendarItem}from'../domain/calendar';import{freeSlots}from'../domain/calendar';import'./style.css';
-type Row={event:PlannerEvent;google?:EventPublication;twitch?:EventPublication};type Hub={items:CalendarItem[];rows:Row[];warnings:string[];fetchedAt:number;fromCache:boolean};type Settings={timezone:string;googleDefaultCalendarId:string;googleAvailabilityCalendarIds:string[];twitchClientId:string;availabilityLocal:boolean;availabilityGoogle:boolean;availabilityTwitch:boolean;onboardingDone:boolean;googleConfigured:boolean;googleConnected:boolean;twitchConfigured:boolean;twitchConnected:boolean;googleAccount?:string;twitchAccount?:string;broadcasterId?:string;refreshMinutes:number;liveBufferBefore:number;liveBufferAfter:number;personalBufferBefore:number;personalBufferAfter:number;notificationsEnabled:boolean;liveReminderMinutes:number;personalReminderMinutes:number;closeToTray:boolean;launchAtStartup:boolean};type Category={id:string;name:string;boxArtUrl:string};type Prefill={start:DateTime;end:DateTime};
-const defaults:Settings={timezone:'Europe/Paris',googleDefaultCalendarId:'primary',googleAvailabilityCalendarIds:['primary'],twitchClientId:'',availabilityLocal:true,availabilityGoogle:true,availabilityTwitch:true,onboardingDone:false,googleConfigured:false,googleConnected:false,twitchConfigured:false,twitchConnected:false,refreshMinutes:15,liveBufferBefore:30,liveBufferAfter:15,personalBufferBefore:0,personalBufferAfter:0,notificationsEnabled:true,liveReminderMinutes:30,personalReminderMinutes:60,closeToTray:false,launchAtStartup:false};
-const badge=(p?:EventPublication,name='Google')=>p?.status==='SYNCED'?`✓ ${name}`:p?.status==='ERROR'||p?.status==='REAUTH_REQUIRED'?`⚠ ${name}`:null;
-function EventForm({editing,prefill,settings,onDone,onCancel}:{editing?:PlannerEvent;prefill?:Prefill;settings:Settings;onDone:()=>void;onCancel:()=>void}){const zone=editing?.timezone??settings.timezone,start=editing?DateTime.fromISO(editing.startAtUtc).setZone(zone):prefill?.start??DateTime.now().setZone(zone).plus({hours:1}).startOf('hour'),finish=editing?DateTime.fromISO(editing.endAtUtc).setZone(zone):prefill?.end??start.plus({hours:2}),[twitch,setTwitch]=useState(editing?.syncTwitch??false),[query,setQuery]=useState(editing?.twitchCategoryName??''),[selected,setSelected]=useState<Category|undefined>(),[categories,setCategories]=useState<Category[]>([]),[preview,setPreview]=useState<any>(),[input,setInput]=useState<EventInput>(),[error,setError]=useState('');useEffect(()=>{if(!twitch||query.length<2)return;const t=setTimeout(()=>window.damplanner.categories(query).then(setCategories).catch(()=>setCategories([])),250);return()=>clearTimeout(t)},[query,twitch]);async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();const d=new FormData(e.currentTarget),s=DateTime.fromISO(`${d.get('date')}T${d.get('start')}`,{zone}),raw=DateTime.fromISO(`${d.get('date')}T${d.get('end')}`,{zone}),end=raw<=s?raw.plus({days:1}):raw,value={kind:d.get('kind'),title:String(d.get('title')),description:String(d.get('description')??''),startAtUtc:s.toUTC().toISO(),endAtUtc:end.toUTC().toISO(),timezone:zone,syncGoogle:d.has('google'),syncTwitch:d.has('twitch'),googleCalendarId:d.has('google')?String(d.get('calendar')):null,twitchTitle:d.has('twitch')?String(d.get('twitchTitle')):null,twitchCategoryId:d.has('twitch')?(selected?.id??editing?.twitchCategoryId??null):null,twitchCategoryName:d.has('twitch')?(selected?.name??editing?.twitchCategoryName??null):null,twitchCategoryBoxArtUrl:null,status:d.has('draft')?'DRAFT':'PUBLISHED',bufferBeforeMinutes:null,bufferAfterMinutes:null,checklist:editing?.checklist??[],recurrence:null}as EventInput;try{const p=await window.damplanner.preview(value,editing?.id);setInput(value);setPreview(p)}catch(x){setError(String(x))}}async function save(hash?:string){await window.damplanner.save(input!,editing?.id,hash);onDone()}return <section className="panel"><div className="titlebar"><div><small>ÉVÉNEMENT</small><h1>{editing?'Modifier':'Nouvel événement'}</h1></div><button onClick={onCancel}>Fermer</button></div><form className="event-form" onSubmit={submit}><div className="two"><label>Type<select name="kind" defaultValue={editing?.kind??'LIVE'}><option value="LIVE">Live</option><option value="PERSONAL">Personnel</option></select></label><label>Titre<input name="title" required defaultValue={editing?.title}/></label></div><label>Description privée<textarea name="description" defaultValue={editing?.description}/></label><div className="three"><label>Date<input name="date" type="date" required defaultValue={start.toISODate()!}/></label><label>Début<input name="start" type="time" required defaultValue={start.toFormat('HH:mm')}/></label><label>Fin<input name="end" type="time" required defaultValue={finish.toFormat('HH:mm')}/></label></div><div className="syncbox"><label><input name="draft" type="checkbox" defaultChecked={editing?.status==='DRAFT'}/> Enregistrer comme brouillon</label><label><input name="google" type="checkbox" defaultChecked={editing?.syncGoogle}/> Google Calendar</label><select name="calendar" defaultValue={editing?.googleCalendarId??settings.googleDefaultCalendarId}><option>{settings.googleDefaultCalendarId}</option></select><label><input name="twitch" type="checkbox" checked={twitch} onChange={e=>setTwitch(e.target.checked)}/> Twitch</label>{twitch&&<><label>Titre public Twitch<input name="twitchTitle" required defaultValue={editing?.twitchTitle??''}/></label><label>Catégorie Twitch<input value={query} onChange={e=>setQuery(e.target.value)}/></label>{categories.map(c=><button type="button" key={c.id} onClick={()=>{setSelected(c);setQuery(c.name);setCategories([])}}>{c.name}</button>)}</>}</div>{error&&<p className="error">{error}</p>}<div className="actions"><button type="button" onClick={onCancel}>Annuler</button><button className="primary">Prévisualiser et vérifier</button></div></form>{preview&&<div className="modal" role="dialog"><div><h2>{preview.availability.status==='AVAILABLE'?'Événement prêt à enregistrer':preview.availability.status==='CONFLICT'?'Chevauchement détecté':'Vérification incomplète'}</h2>{preview.availability.errors?.map((x:string)=><p key={x}>{x}</p>)}{preview.availability.conflicts?.map((x:any)=><p key={x.id}>{x.title} · {x.source}</p>)}<div className="actions"><button onClick={()=>setPreview(undefined)}>Modifier le créneau</button><button className="primary" onClick={()=>save(preview.availability.status==='AVAILABLE'?undefined:preview.availability.hash)}>{preview.availability.status==='AVAILABLE'?'Enregistrer':'Valider quand même'}</button></div></div></div>}</section>}
-function ItemCard({item,onEdit,onReload}:{item:CalendarItem;onEdit:(id:string)=>void;onReload:()=>void}){async function adopt(){if(confirm(`Gérer « ${item.title} » dans DamPlanner ?`)){await window.damplanner.adopt({id:item.externalId,title:item.title,description:item.description,startAtUtc:item.startAtUtc,endAtUtc:item.endAtUtc,allDay:item.allDay,calendarId:item.calendarId,calendarName:item.calendarName,color:item.color});onReload()}}return <article className={`event ${item.source.toLowerCase()} ${item.draft?'draft':''}`}><time>{item.allDay?'Toute la journée':DateTime.fromISO(item.startAtUtc).toFormat('HH:mm')+'–'+DateTime.fromISO(item.endAtUtc).toFormat('HH:mm')}</time><span className={'tag '+(item.kind??item.source).toLowerCase()}>{item.kind==='PERSONAL'?'PERSO':item.kind??item.source}</span><div><strong>{item.title}</strong><small>{item.calendarName??(item.source==='DAMPLANNER'?'DamPlanner':item.source)}</small></div><div className="statuses">{item.draft?<span>Brouillon</span>:<>{badge(item.google)&&<span>{badge(item.google)}</span>}{badge(item.twitch,'Twitch')&&<span>{badge(item.twitch,'Twitch')}</span>}{item.source!=='DAMPLANNER'&&<span>{item.source} seul</span>}</>}</div><div className="row-actions">{item.editable&&<button onClick={()=>onEdit(item.localEventId!)}>Modifier</button>}{item.draft&&<button onClick={async()=>{await window.damplanner.publish(item.localEventId!);onReload()}}>Publier</button>}{item.editable&&<button onClick={async()=>{const start=DateTime.fromISO(item.startAtUtc).plus({weeks:1}),end=DateTime.fromISO(item.endAtUtc).plus({weeks:1});await window.damplanner.duplicate(item.localEventId!,start.toISO()!,end.toISO()!);onReload()}}>Dupliquer</button>}{!item.editable&&item.source==='GOOGLE'&&<button onClick={adopt}>Gérer dans DamPlanner</button>}</div></article>}
-function Agenda({items,zone,onCreate,onEdit,onMove}:{items:CalendarItem[];zone:string;onCreate:(p:Prefill)=>void;onEdit:(id:string)=>void;onMove:(item:CalendarItem,start:string,end:string)=>void}){const[mode,setMode]=useState<'week'|'month'>('week'),[anchor,setAnchor]=useState(DateTime.now().setZone(zone));const begin=(mode==='week'?anchor.startOf('week'):anchor.startOf('month')),days=Array.from({length:mode==='week'?7:begin.daysInMonth!},(_,i)=>begin.plus({days:i}));return <section><div className="calendar-toolbar"><div className="actions"><button onClick={()=>setAnchor(anchor.minus({[mode==='week'?'weeks':'months']:1}))}>‹ Précédent</button><button onClick={()=>setAnchor(DateTime.now().setZone(zone))}>Aujourd’hui</button><button onClick={()=>setAnchor(anchor.plus({[mode==='week'?'weeks':'months']:1}))}>Suivant ›</button></div><h1>{begin.setLocale('fr').toFormat(mode==='week'?'d LLL':'LLLL yyyy')}</h1><div className="actions"><button className={mode==='week'?'active':''} onClick={()=>setMode('week')}>Semaine</button><button className={mode==='month'?'active':''} onClick={()=>setMode('month')}>Mois</button></div></div><div className={'calendar '+mode}>{days.map(day=>{const dayItems=items.filter(x=>DateTime.fromISO(x.startAtUtc).setZone(zone).toISODate()===day.toISODate()||x.allDay&&x.startAtUtc<day.endOf('day').toUTC().toISO()!&&x.endAtUtc>day.startOf('day').toUTC().toISO()!);return <div className={`calendar-day ${day.hasSame(DateTime.now().setZone(zone),'day')?'current':''}`} key={day.toISODate()} onDoubleClick={()=>onCreate({start:day.set({hour:12}),end:day.set({hour:13})})}><header><b>{day.setLocale('fr').toFormat(mode==='week'?'ccc d':'d')}</b></header>{dayItems.map(x=><button draggable={x.editable} onDragEnd={()=>{if(x.editable){const s=DateTime.fromISO(x.startAtUtc).plus({days:1}),e=DateTime.fromISO(x.endAtUtc).plus({days:1});onMove(x,s.toISO()!,e.toISO()!)}}} onClick={()=>x.editable&&onEdit(x.localEventId!)} className={`calendar-event ${x.source.toLowerCase()} ${x.draft?'draft':''}`} style={x.color?{borderLeftColor:x.color}:undefined} key={x.id}><time>{x.allDay?'Toute la journée':DateTime.fromISO(x.startAtUtc).setZone(zone).toFormat('HH:mm')}</time> {x.title}</button>)}</div>})}</div><p className="hint">Double-cliquez un jour pour créer. Glissez un événement DamPlanner pour le déplacer au jour suivant.</p></section>}
-function Today({items,zone}:{items:CalendarItem[];zone:string}){const now=DateTime.now().setZone(zone),today=now.toISODate()!,daily=items.filter(x=>x.startAtUtc<now.endOf('day').toUTC().toISO()!&&x.endAtUtc>now.startOf('day').toUTC().toISO()!),next=items.find(x=>x.startAtUtc>now.toUTC().toISO()!),live=items.find(x=>x.kind==='LIVE'&&x.startAtUtc>now.toUTC().toISO()!),free=freeSlots(items,today,zone,30);return <><div className="hero"><div><small>AUJOURD’HUI</small><h1>{now.setLocale('fr').toFormat('cccc d LLLL')}</h1></div></div><div className="dashboard"><section className="metric"><small>PROCHAIN ÉVÉNEMENT</small><h2>{next?`${DateTime.fromISO(next.startAtUtc).setZone(zone).toFormat('HH:mm')} — ${next.title}`:'Journée libre'}</h2>{next&&<p>dans {Math.max(0,Math.round(DateTime.fromISO(next.startAtUtc).diff(now,'minutes').minutes))} min</p>}</section><section className="metric"><small>PROCHAIN LIVE</small><h2>{live?`${DateTime.fromISO(live.startAtUtc).setZone(zone).toFormat('HH:mm')} — ${live.title}`:'Aucun live prévu'}</h2>{live&&<p>Préparation : {live.metadata?.checklist??'à vérifier'}</p>}</section><section className="metric wide"><small>TEMPS LIBRE</small>{free.slice(0,4).map(x=><p key={x.startAtUtc}>{DateTime.fromISO(x.startAtUtc).setZone(zone).toFormat('HH:mm')} → {DateTime.fromISO(x.endAtUtc).setZone(zone).toFormat('HH:mm')} · {Math.round(x.minutes)} min</p>)}</section></div><h2>Événements du jour</h2>{daily.map(x=><ItemCard key={x.id} item={x} onEdit={()=>{}} onReload={()=>{}}/>)}</>}
-function SettingsView({value,reload}:{value:Settings;reload:()=>void}){const[s,setS]=useState(value),[message,setMessage]=useState('');async function save(){await window.damplanner.updateSettings(s as unknown as Record<string,unknown>);setMessage('Réglages enregistrés');reload()}return <section className="panel settings"><h1>Réglages</h1><h2>Général</h2><label>Fuseau horaire<input value={s.timezone} onChange={e=>setS({...s,timezone:e.target.value})}/></label><label>Actualisation automatique<select value={s.refreshMinutes} onChange={e=>setS({...s,refreshMinutes:Number(e.target.value)})}><option value="0">Désactivée</option><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option></select></label><h2>Temps tampons</h2><div className="two"><label>Avant LIVE (min)<input type="number" value={s.liveBufferBefore} onChange={e=>setS({...s,liveBufferBefore:Number(e.target.value)})}/></label><label>Après LIVE (min)<input type="number" value={s.liveBufferAfter} onChange={e=>setS({...s,liveBufferAfter:Number(e.target.value)})}/></label></div><h2>Windows</h2><label><input type="checkbox" checked={s.notificationsEnabled} onChange={e=>setS({...s,notificationsEnabled:e.target.checked})}/> Notifications activées</label><label><input type="checkbox" checked={s.closeToTray} onChange={e=>setS({...s,closeToTray:e.target.checked})}/> Fermer dans la zone de notification</label><label><input type="checkbox" checked={s.launchAtStartup} onChange={e=>setS({...s,launchAtStartup:e.target.checked})}/> Lancer DamPlanner au démarrage de Windows</label><h2>État des connexions</h2><p className="provider-state">Google — {s.googleConnected?'✓ connecté':'non connecté'}<br/>Twitch — {s.twitchConnected?'✓ connecté':'non connecté'}</p><div className="actions"><button onClick={async()=>setMessage(JSON.stringify(await window.damplanner.testConnections()))}>Tester les connexions</button><button onClick={()=>window.damplanner.connectGoogle()}>Connecter Google</button><button onClick={()=>window.damplanner.beginTwitch()}>Connecter Twitch</button></div><button className="primary" onClick={save}>Enregistrer les réglages</button>{message&&<p>{message}</p>}</section>}
-function App(){const[settings,setSettings]=useState(defaults),[hub,setHub]=useState<Hub>({items:[],rows:[],warnings:[],fetchedAt:Date.now(),fromCache:false}),[view,setView]=useState<'today'|'planning'|'agenda'|'form'|'settings'>('today'),[editing,setEditing]=useState<PlannerEvent>(),[prefill,setPrefill]=useState<Prefill>(),[query,setQuery]=useState(''),[filter,setFilter]=useState('Tous'),[loaded,setLoaded]=useState(false);async function load(refresh=false){const s=await window.damplanner.settings() as Settings;setSettings({...defaults,...s});const now=DateTime.now(),data=await window.damplanner.hub(now.minus({days:30}).toUTC().toISO()!,now.plus({days:90}).toUTC().toISO()!,refresh) as Hub;setHub(data);setLoaded(true)}useEffect(()=>{void load()},[]);useEffect(()=>{if(!settings.refreshMinutes)return;const timer=setInterval(()=>void load(true),settings.refreshMinutes*60000);return()=>clearInterval(timer)},[settings.refreshMinutes]);const shown=useMemo(()=>hub.items.filter(x=>{const text=`${x.title} ${x.description??''} ${x.calendarName??''} ${x.metadata?.categoryName??''}`.toLowerCase();const match=text.includes(query.toLowerCase());return match&&(filter==='Tous'||filter==='LIVE'&&x.kind==='LIVE'||filter==='Personnel'&&x.kind==='PERSONAL'||filter==='Brouillons'&&x.draft||filter===x.source.replace('DAMPLANNER','DamPlanner')||filter==='Erreurs'&&[x.google?.status,x.twitch?.status].some(s=>s==='ERROR'))}),[hub.items,query,filter]);async function move(item:CalendarItem,start:string,end:string){const row=hub.rows.find(r=>r.event.id===item.localEventId);if(!row)return;const input={...row.event,startAtUtc:start,endAtUtc:end};delete (input as Partial<PlannerEvent>).id;delete (input as Partial<PlannerEvent>).createdAt;delete (input as Partial<PlannerEvent>).updatedAt;delete (input as Partial<PlannerEvent>).deletedAt;delete (input as Partial<PlannerEvent>).conflictOverrideHash;delete (input as Partial<PlannerEvent>).conflictOverrideAt;const p:any=await window.damplanner.preview(input as EventInput,row.event.id);if(p.availability.status!=='AVAILABLE'&&!confirm('Chevauchement détecté. Déplacer quand même ?'))return;await window.damplanner.save(input as EventInput,row.event.id,p.availability.status==='AVAILABLE'?undefined:p.availability.hash);await load(true)}if(loaded&&!settings.onboardingDone)return <div className="onboarding"><div><b>◆ DamPlanner</b><h1>Votre planning, en toute simplicité</h1><p>Centralisez DamPlanner, Google Calendar et Twitch.</p><button className="primary" onClick={async()=>{await window.damplanner.updateSettings({onboardingDone:true});await load()}}>Commencer</button></div></div>;return <><header><b>◆ DamPlanner</b><nav><button className={view==='today'?'active':''} onClick={()=>setView('today')}>Aujourd’hui</button><button className={view==='planning'?'active':''} onClick={()=>setView('planning')}>Planning</button><button className={view==='agenda'?'active':''} onClick={()=>setView('agenda')}>Agenda</button><button className="primary" onClick={()=>{setEditing(undefined);setPrefill(undefined);setView('form')}}>+ Nouvel événement</button><button onClick={()=>setView('settings')}>Réglages</button></nav></header><main>{view==='form'&&<EventForm editing={editing} prefill={prefill} settings={settings} onCancel={()=>setView('planning')} onDone={async()=>{await load(true);setView('planning')}}/>}{view==='settings'&&<SettingsView value={settings} reload={()=>void load()}/>} {view==='today'&&<Today items={shown} zone={settings.timezone}/>} {view==='agenda'&&<Agenda items={shown} zone={settings.timezone} onCreate={p=>{setPrefill(p);setEditing(undefined);setView('form')}} onEdit={id=>{setEditing(hub.rows.find(r=>r.event.id===id)?.event);setView('form')}} onMove={move}/>} {view==='planning'&&<><div className="hero"><div><small>PLANNING UNIFIÉ</small><h1>Votre agenda</h1><p>{shown.length} élément(s) · Dernière actualisation : {DateTime.fromMillis(hub.fetchedAt).toFormat('HH:mm')}{hub.fromCache?' · données en cache':''}</p></div><button onClick={()=>load(true)}>Actualiser</button></div>{hub.warnings.map(x=><p className="warning" key={x}>⚠ {x}</p>)}<div className="search"><input aria-label="Rechercher" placeholder="Rechercher…" value={query} onChange={e=>setQuery(e.target.value)}/></div><div className="filters">{['Tous','LIVE','Personnel','Brouillons','DamPlanner','GOOGLE','TWITCH','Erreurs'].map(x=><button className={filter===x?'active':''} key={x} onClick={()=>setFilter(x)}>{x}</button>)}</div>{shown.map(x=><ItemCard key={x.id} item={x} onReload={()=>void load(true)} onEdit={id=>{setEditing(hub.rows.find(r=>r.event.id===id)?.event);setView('form')}}/>)}</>}</main></>}
-createRoot(document.getElementById('root')!).render(<App/>);
+import React, { useEffect, useMemo, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { DateTime } from 'luxon';
+import type { EventInput, EventPublication, EventTemplate, PlannerEvent } from '../domain/models';
+import type { CalendarItem } from '../domain/calendar';
+import { freeSlots } from '../domain/calendar';
+import './style.css';
+
+type Row = { event: PlannerEvent; google?: EventPublication; twitch?: EventPublication };
+type Hub = { items: CalendarItem[]; rows: Row[]; warnings: string[]; fetchedAt: number; fromCache: boolean };
+type Settings = {
+  timezone: string;
+  googleDefaultCalendarId: string;
+  googleAvailabilityCalendarIds: string[];
+  twitchClientId: string;
+  availabilityLocal: boolean;
+  availabilityGoogle: boolean;
+  availabilityTwitch: boolean;
+  onboardingDone: boolean;
+  googleConfigured: boolean;
+  googleConnected: boolean;
+  twitchConfigured: boolean;
+  twitchConnected: boolean;
+  googleAccount?: string;
+  twitchAccount?: string;
+  broadcasterId?: string;
+  refreshMinutes: 0 | 5 | 15 | 30;
+  liveBufferBefore: number;
+  liveBufferAfter: number;
+  personalBufferBefore: number;
+  personalBufferAfter: number;
+  notificationsEnabled: boolean;
+  liveReminderMinutes: number;
+  personalReminderMinutes: number;
+  closeToTray: boolean;
+  launchAtStartup: boolean;
+};
+type Category = { id: string; name: string; boxArtUrl: string };
+type GoogleCalendar = { id: string; summary: string; primary?: boolean; backgroundColor?: string };
+type DeviceState = { deviceCode: string; userCode: string; verificationUri: string; expiresAt: number; interval: number };
+type Prefill = { start: DateTime; end: DateTime };
+type Preview = {
+  availability: {
+    status: 'AVAILABLE' | 'CONFLICT' | 'INCOMPLETE';
+    hash: string;
+    errors: string[];
+    conflicts: { id: string; title: string; source: string; startAtUtc: string; endAtUtc: string }[];
+  };
+};
+
+const defaults: Settings = {
+  timezone: 'Europe/Paris',
+  googleDefaultCalendarId: 'primary',
+  googleAvailabilityCalendarIds: ['primary'],
+  twitchClientId: '',
+  availabilityLocal: true,
+  availabilityGoogle: true,
+  availabilityTwitch: true,
+  onboardingDone: false,
+  googleConfigured: false,
+  googleConnected: false,
+  twitchConfigured: false,
+  twitchConnected: false,
+  refreshMinutes: 15,
+  liveBufferBefore: 30,
+  liveBufferAfter: 15,
+  personalBufferBefore: 0,
+  personalBufferAfter: 0,
+  notificationsEnabled: true,
+  liveReminderMinutes: 30,
+  personalReminderMinutes: 60,
+  closeToTray: false,
+  launchAtStartup: false,
+};
+
+function providerBadge(publication: EventPublication | undefined, name: string) {
+  if (publication?.status === 'SYNCED') return `✓ ${name}`;
+  if (publication?.status === 'ERROR' || publication?.status === 'REAUTH_REQUIRED') return `⚠ ${name}`;
+  if (publication?.status === 'PUBLISHING' || publication?.status === 'PENDING') return `… ${name}`;
+  return null;
+}
+
+function EventForm({ editing, prefill, settings, onDone, onCancel }: {
+  editing?: PlannerEvent;
+  prefill?: Prefill;
+  settings: Settings;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const zone = editing?.timezone ?? settings.timezone;
+  const initialStart = editing
+    ? DateTime.fromISO(editing.startAtUtc).setZone(zone)
+    : prefill?.start ?? DateTime.now().setZone(zone).plus({ hours: 1 }).startOf('hour');
+  const initialEnd = editing
+    ? DateTime.fromISO(editing.endAtUtc).setZone(zone)
+    : prefill?.end ?? initialStart.plus({ hours: 2 });
+  const [twitch, setTwitch] = useState(editing?.syncTwitch ?? false);
+  const [query, setQuery] = useState(editing?.twitchCategoryName ?? '');
+  const [selected, setSelected] = useState<Category | undefined>(editing?.twitchCategoryId ? {
+    id: editing.twitchCategoryId,
+    name: editing.twitchCategoryName ?? '',
+    boxArtUrl: editing.twitchCategoryBoxArtUrl ?? '',
+  } : undefined);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [preview, setPreview] = useState<Preview>();
+  const [input, setInput] = useState<EventInput>();
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [checklist, setChecklist] = useState(editing?.checklist ?? []);
+  const [newChecklistItem, setNewChecklistItem] = useState('');
+
+  useEffect(() => {
+    if (!twitch || query.trim().length < 2 || selected?.name === query) return;
+    const timer = setTimeout(() => {
+      window.damplanner.categories(query).then(setCategories).catch((reason: Error) => setError(reason.message));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, twitch, selected]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    const data = new FormData(event.currentTarget);
+    const start = DateTime.fromISO(`${data.get('date')}T${data.get('start')}`, { zone });
+    const rawEnd = DateTime.fromISO(`${data.get('date')}T${data.get('end')}`, { zone });
+    const end = rawEnd <= start ? rawEnd.plus({ days: 1 }) : rawEnd;
+    const value: EventInput = {
+      kind: data.get('kind') as 'LIVE' | 'PERSONAL',
+      title: String(data.get('title')),
+      description: String(data.get('description') ?? ''),
+      startAtUtc: start.toUTC().toISO()!,
+      endAtUtc: end.toUTC().toISO()!,
+      timezone: zone,
+      syncGoogle: data.has('google'),
+      syncTwitch: data.has('twitch'),
+      googleCalendarId: data.has('google') ? String(data.get('calendar') || settings.googleDefaultCalendarId) : null,
+      twitchTitle: data.has('twitch') ? String(data.get('twitchTitle')) : null,
+      twitchCategoryId: data.has('twitch') ? selected?.id ?? null : null,
+      twitchCategoryName: data.has('twitch') ? selected?.name ?? null : null,
+      twitchCategoryBoxArtUrl: data.has('twitch') ? selected?.boxArtUrl ?? null : null,
+      status: data.has('draft') ? 'DRAFT' : 'PUBLISHED',
+      bufferBeforeMinutes: editing?.bufferBeforeMinutes ?? null,
+      bufferAfterMinutes: editing?.bufferAfterMinutes ?? null,
+      checklist,
+      recurrence: editing?.recurrence ?? null,
+    };
+    try {
+      setBusy(true);
+      const result = await window.damplanner.preview(value, editing?.id) as Preview;
+      setInput(value);
+      setPreview(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save(overrideHash?: string) {
+    if (!input) return;
+    try {
+      setBusy(true);
+      if (editing && ((editing.syncGoogle && !input.syncGoogle) || (editing.syncTwitch && !input.syncTwitch))) {
+        if (!confirm('La publication distante désactivée sera supprimée. Continuer ?')) return;
+      }
+      await window.damplanner.save(input, editing?.id, overrideHash);
+      onDone();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addChecklistItem() {
+    const label = newChecklistItem.trim();
+    if (!label) return;
+    setChecklist([...checklist, { id: crypto.randomUUID(), label, done: false }]);
+    setNewChecklistItem('');
+  }
+
+  return <section className="panel">
+    <div className="titlebar">
+      <div><small>ÉVÉNEMENT</small><h1>{editing ? 'Modifier' : 'Nouvel événement'}</h1></div>
+      <button onClick={onCancel}>Fermer</button>
+    </div>
+    <form className="event-form" onSubmit={submit}>
+      <div className="two">
+        <label>Type<select name="kind" defaultValue={editing?.kind ?? 'LIVE'}><option value="LIVE">Live</option><option value="PERSONAL">Personnel</option></select></label>
+        <label>Titre<input name="title" required defaultValue={editing?.title} /></label>
+      </div>
+      <label>Description privée<textarea name="description" defaultValue={editing?.description} /></label>
+      <div className="three">
+        <label>Date<input name="date" type="date" required defaultValue={initialStart.toISODate()!} /></label>
+        <label>Début<input name="start" type="time" required defaultValue={initialStart.toFormat('HH:mm')} /></label>
+        <label>Fin<input name="end" type="time" required defaultValue={initialEnd.toFormat('HH:mm')} /></label>
+      </div>
+      <div className="syncbox">
+        <label><input name="draft" type="checkbox" defaultChecked={editing?.status === 'DRAFT'} /> Enregistrer comme brouillon</label>
+        <label><input name="google" type="checkbox" defaultChecked={editing?.syncGoogle} /> Google Calendar</label>
+        <select name="calendar" defaultValue={editing?.googleCalendarId ?? settings.googleDefaultCalendarId}>
+          {[...new Set([settings.googleDefaultCalendarId, ...settings.googleAvailabilityCalendarIds])].map(calendar => <option key={calendar} value={calendar}>{calendar}</option>)}
+        </select>
+        <label><input name="twitch" type="checkbox" checked={twitch} onChange={event => setTwitch(event.target.checked)} /> Twitch</label>
+        {twitch && <div className="twitch-fields">
+          <label>Titre public Twitch<input name="twitchTitle" required defaultValue={editing?.twitchTitle ?? ''} /></label>
+          <label>Catégorie Twitch<input value={query} onChange={event => { setQuery(event.target.value); setSelected(undefined); }} required placeholder="Rechercher une catégorie…" /></label>
+          {categories.length > 0 && !selected && <div className="suggestions">{categories.map(category => <button type="button" key={category.id} onClick={() => { setSelected(category); setQuery(category.name); setCategories([]); }}><img src={category.boxArtUrl} />{category.name}</button>)}</div>}
+        </div>}
+      </div>
+      <fieldset>
+        <legend>Checklist de préparation</legend>
+        {checklist.map(item => <label key={item.id} className="check-row"><input type="checkbox" checked={item.done} onChange={event => setChecklist(checklist.map(value => value.id === item.id ? { ...value, done: event.target.checked } : value))} />{item.label}<button type="button" onClick={() => setChecklist(checklist.filter(value => value.id !== item.id))}>×</button></label>)}
+        <div className="actions"><input aria-label="Nouvel élément checklist" value={newChecklistItem} onChange={event => setNewChecklistItem(event.target.value)} placeholder="Ajouter une étape…" /><button type="button" onClick={addChecklistItem}>Ajouter</button></div>
+      </fieldset>
+      {error && <p className="error">{error}</p>}
+      <div className="actions"><button type="button" onClick={onCancel}>Annuler</button><button className="primary" disabled={busy}>{busy ? 'Vérification…' : 'Prévisualiser et vérifier'}</button></div>
+    </form>
+    {preview && <div className="modal" role="dialog" aria-modal="true"><div>
+      <h2>{preview.availability.status === 'AVAILABLE' ? 'Événement prêt à enregistrer' : preview.availability.status === 'CONFLICT' ? 'Chevauchement détecté' : 'Vérification incomplète'}</h2>
+      {preview.availability.errors.map(message => <p className="warning" key={message}>{message}</p>)}
+      {preview.availability.conflicts.map(conflict => <article className="conflict" key={`${conflict.source}:${conflict.id}`}><b>{conflict.title}</b><span>{conflict.source} · {DateTime.fromISO(conflict.startAtUtc).setZone(zone).toFormat('HH:mm')}–{DateTime.fromISO(conflict.endAtUtc).setZone(zone).toFormat('HH:mm')}</span></article>)}
+      <div className="actions"><button onClick={() => setPreview(undefined)}>Modifier le créneau</button><button className="primary" onClick={() => save(preview.availability.status === 'AVAILABLE' ? undefined : preview.availability.hash)}>{preview.availability.status === 'AVAILABLE' ? 'Enregistrer' : preview.availability.status === 'CONFLICT' ? 'Valider quand même' : 'Enregistrer hors ligne'}</button></div>
+    </div></div>}
+  </section>;
+}
+
+function ItemCard({ item, onEdit, onReload }: { item: CalendarItem; onEdit: (id: string) => void; onReload: () => void }) {
+  async function adopt() {
+    if (!item.externalId || !confirm(`Gérer « ${item.title} » dans DamPlanner ?`)) return;
+    await window.damplanner.adopt({ id: item.externalId, calendarId: item.calendarId });
+    onReload();
+  }
+
+  async function publishDraft() {
+    if (!item.localEventId) return;
+    const first = await window.damplanner.publish(item.localEventId) as { requiresConfirmation?: boolean; availability?: { hash: string } };
+    if (first.requiresConfirmation && first.availability && confirm('Un conflit a été détecté. Publier quand même ?')) {
+      await window.damplanner.publish(item.localEventId, first.availability.hash);
+    }
+    onReload();
+  }
+
+  async function remove() {
+    if (!item.localEventId || !confirm(`Supprimer « ${item.title} » et ses publications distantes ?`)) return;
+    await window.damplanner.remove(item.localEventId);
+    onReload();
+  }
+
+  async function retry(provider: 'GOOGLE' | 'TWITCH') {
+    if (!item.localEventId) return;
+    await window.damplanner.retry(item.localEventId, provider);
+    onReload();
+  }
+
+  return <article className={`event ${item.source.toLowerCase()} ${item.draft ? 'draft' : ''}`}>
+    <time>{item.allDay ? 'Toute la journée' : `${DateTime.fromISO(item.startAtUtc).toFormat('HH:mm')}–${DateTime.fromISO(item.endAtUtc).toFormat('HH:mm')}`}</time>
+    <span className={`tag ${(item.kind ?? item.source).toLowerCase()}`}>{item.kind === 'PERSONAL' ? 'PERSO' : item.kind ?? item.source}</span>
+    <div><strong>{item.title}</strong><small>{item.calendarName ?? (item.source === 'DAMPLANNER' ? 'DamPlanner' : item.source)}</small>{item.metadata?.conflictAccepted === 'true' && <small className="accepted">Chevauchement accepté</small>}</div>
+    <div className="statuses">
+      {item.draft ? <span>Brouillon</span> : <>
+        {providerBadge(item.google, 'Google') && <span>{providerBadge(item.google, 'Google')}</span>}
+        {providerBadge(item.twitch, 'Twitch') && <span>{providerBadge(item.twitch, 'Twitch')}</span>}
+        {item.source !== 'DAMPLANNER' && <span>{item.source === 'GOOGLE' ? 'Google seul' : 'Twitch seul'}</span>}
+      </>}
+    </div>
+    <div className="row-actions">
+      {item.editable && <button onClick={() => onEdit(item.localEventId!)}>Modifier</button>}
+      {item.draft && <button onClick={publishDraft}>Publier</button>}
+      {item.editable && <button onClick={async () => { const start = DateTime.fromISO(item.startAtUtc).plus({ weeks: 1 }); const end = DateTime.fromISO(item.endAtUtc).plus({ weeks: 1 }); await window.damplanner.duplicate(item.localEventId!, start.toISO()!, end.toISO()!); onReload(); }}>Dupliquer</button>}
+      {item.google?.status === 'ERROR' && <button onClick={() => retry('GOOGLE')}>Réessayer Google</button>}
+      {item.twitch?.status === 'ERROR' && <button onClick={() => retry('TWITCH')}>Réessayer Twitch</button>}
+      {item.editable && <button onClick={remove}>Supprimer</button>}
+      {!item.editable && item.source === 'GOOGLE' && <button onClick={adopt}>Gérer dans DamPlanner</button>}
+    </div>
+  </article>;
+}
+
+function layoutTimedItems(items: CalendarItem[], zone: string) {
+  const sorted = [...items].sort((a, b) => a.startAtUtc.localeCompare(b.startAtUtc));
+  const columnEnds: number[] = [];
+  const assigned = sorted.map(item => {
+    const start = DateTime.fromISO(item.startAtUtc).setZone(zone).toMillis();
+    const end = DateTime.fromISO(item.endAtUtc).setZone(zone).toMillis();
+    let column = columnEnds.findIndex(value => value <= start);
+    if (column < 0) column = columnEnds.length;
+    columnEnds[column] = end;
+    return { item, column };
+  });
+  const total = Math.max(1, columnEnds.length);
+  return assigned.map(value => ({ ...value, total }));
+}
+
+function Agenda({ items, zone, onCreate, onEdit, onMove }: {
+  items: CalendarItem[];
+  zone: string;
+  onCreate: (prefill: Prefill) => void;
+  onEdit: (id: string) => void;
+  onMove: (item: CalendarItem, start: string, end: string) => void;
+}) {
+  const [mode, setMode] = useState<'week' | 'month'>('week');
+  const [anchor, setAnchor] = useState(DateTime.now().setZone(zone));
+  const begin = mode === 'week' ? anchor.startOf('week') : anchor.startOf('month');
+  const days = Array.from({ length: mode === 'week' ? 7 : begin.daysInMonth! }, (_, index) => begin.plus({ days: index }));
+
+  function createAtPointer(day: DateTime, event: React.MouseEvent<HTMLDivElement>) {
+    const box = event.currentTarget.getBoundingClientRect();
+    const minutes = Math.max(0, Math.min(23 * 60 + 30, Math.round(((event.clientY - box.top) / box.height) * 48) * 30));
+    const start = day.startOf('day').plus({ minutes });
+    onCreate({ start, end: start.plus({ hours: 1 }) });
+  }
+
+  function dropAtPointer(day: DateTime, event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const id = event.dataTransfer.getData('text/plain');
+    const item = items.find(value => value.id === id);
+    if (!item?.editable) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    const minutes = Math.max(0, Math.min(23 * 60 + 30, Math.round(((event.clientY - box.top) / box.height) * 48) * 30));
+    const duration = Date.parse(item.endAtUtc) - Date.parse(item.startAtUtc);
+    const start = day.startOf('day').plus({ minutes });
+    onMove(item, start.toUTC().toISO()!, start.plus({ milliseconds: duration }).toUTC().toISO()!);
+  }
+
+  function resize(item: CalendarItem, event: React.PointerEvent<HTMLSpanElement>) {
+    if (!item.editable) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const originY = event.clientY;
+    const originalEnd = DateTime.fromISO(item.endAtUtc);
+    const start = DateTime.fromISO(item.startAtUtc);
+    const onUp = (pointer: PointerEvent) => {
+      window.removeEventListener('pointerup', onUp);
+      const deltaMinutes = Math.round((pointer.clientY - originY) / 12) * 15;
+      const nextEnd = originalEnd.plus({ minutes: deltaMinutes });
+      if (nextEnd.diff(start, 'minutes').minutes >= 30) onMove(item, item.startAtUtc, nextEnd.toUTC().toISO()!);
+    };
+    window.addEventListener('pointerup', onUp, { once: true });
+  }
+
+  return <section>
+    <div className="calendar-toolbar">
+      <div className="actions"><button onClick={() => setAnchor(anchor.minus({ [mode === 'week' ? 'weeks' : 'months']: 1 }))}>‹ Précédent</button><button onClick={() => setAnchor(DateTime.now().setZone(zone))}>Aujourd’hui</button><button onClick={() => setAnchor(anchor.plus({ [mode === 'week' ? 'weeks' : 'months']: 1 }))}>Suivant ›</button></div>
+      <h1>{begin.setLocale('fr').toFormat(mode === 'week' ? "'Semaine du' d LLLL" : 'LLLL yyyy')}</h1>
+      <div className="actions"><button className={mode === 'week' ? 'active' : ''} onClick={() => setMode('week')}>Semaine</button><button className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>Mois</button></div>
+    </div>
+    {mode === 'week' ? <div className="week-calendar">
+      <div className="all-day-row">{days.map(day => <div className="all-day-cell" key={day.toISODate()}><b>{day.setLocale('fr').toFormat('ccc d')}</b>{items.filter(item => item.allDay && item.startAtUtc < day.plus({ days: 1 }).startOf('day').toUTC().toISO()! && item.endAtUtc > day.startOf('day').toUTC().toISO()!).map(item => <span className={`all-day-event ${item.source.toLowerCase()}`} key={item.id}>{item.title}</span>)}</div>)}</div>
+      <div className="week-scroll"><div className="time-labels">{Array.from({ length: 24 }, (_, hour) => <span key={hour} style={{ top: `${hour * 48}px` }}>{String(hour).padStart(2, '0')}:00</span>)}</div><div className="week-columns">{days.map(day => {
+        const timed = items.filter(item => !item.allDay && DateTime.fromISO(item.startAtUtc).setZone(zone).toISODate() === day.toISODate());
+        return <div className={`time-track ${day.hasSame(DateTime.now().setZone(zone), 'day') ? 'current' : ''}`} key={day.toISODate()} onDoubleClick={event => createAtPointer(day, event)} onDragOver={event => event.preventDefault()} onDrop={event => dropAtPointer(day, event)}>
+          {layoutTimedItems(timed, zone).map(({ item, column, total }) => {
+            const start = DateTime.fromISO(item.startAtUtc).setZone(zone);
+            const end = DateTime.fromISO(item.endAtUtc).setZone(zone);
+            const top = (start.hour * 60 + start.minute) / 30 * 24;
+            const height = Math.max(24, end.diff(start, 'minutes').minutes / 30 * 24);
+            return <div key={item.id} className={`calendar-event ${item.source.toLowerCase()} ${item.draft ? 'draft' : ''}`} draggable={item.editable} onDragStart={event => event.dataTransfer.setData('text/plain', item.id)} onClick={event => { event.stopPropagation(); if (item.editable) onEdit(item.localEventId!); }} style={{ top: `${top}px`, height: `${height}px`, left: `${column * (100 / total)}%`, width: `${100 / total}%`, borderLeftColor: item.color }} role="button" tabIndex={item.editable ? 0 : -1}>
+              <time>{start.toFormat('HH:mm')}</time> {item.title}{item.editable && <span className="resize-handle" onPointerDown={event => resize(item, event)} />}
+            </div>;
+          })}
+        </div>;
+      })}</div></div>
+    </div> : <div className="month-calendar">{days.map(day => {
+      const dayItems = items.filter(item => item.startAtUtc < day.plus({ days: 1 }).startOf('day').toUTC().toISO()! && item.endAtUtc > day.startOf('day').toUTC().toISO()!);
+      return <div className={`month-day ${day.hasSame(DateTime.now().setZone(zone), 'day') ? 'current' : ''}`} key={day.toISODate()} onDoubleClick={() => onCreate({ start: day.set({ hour: 12 }), end: day.set({ hour: 13 }) })} onDragOver={event => event.preventDefault()} onDrop={event => { const id = event.dataTransfer.getData('text/plain'); const item = items.find(value => value.id === id); if (!item?.editable) return; const oldStart = DateTime.fromISO(item.startAtUtc).setZone(zone); const duration = Date.parse(item.endAtUtc) - Date.parse(item.startAtUtc); const start = day.set({ hour: oldStart.hour, minute: oldStart.minute }); onMove(item, start.toUTC().toISO()!, start.plus({ milliseconds: duration }).toUTC().toISO()!); }}><b>{day.day}</b>{dayItems.slice(0, 5).map(item => <div draggable={item.editable} onDragStart={event => event.dataTransfer.setData('text/plain', item.id)} className={`month-event ${item.source.toLowerCase()}`} key={item.id}>{item.allDay ? '' : `${DateTime.fromISO(item.startAtUtc).setZone(zone).toFormat('HH:mm')} `}{item.title}</div>)}</div>;
+    })}</div>}
+    <p className="hint">Double-cliquez un créneau pour créer. Déplacez ou redimensionnez uniquement les événements gérés par DamPlanner.</p>
+  </section>;
+}
+
+function Today({ items, zone, onEdit, onReload }: { items: CalendarItem[]; zone: string; onEdit: (id: string) => void; onReload: () => void }) {
+  const now = DateTime.now().setZone(zone);
+  const today = now.toISODate()!;
+  const daily = items.filter(item => item.startAtUtc < now.plus({ days: 1 }).startOf('day').toUTC().toISO()! && item.endAtUtc > now.startOf('day').toUTC().toISO()!);
+  const next = items.find(item => item.startAtUtc > now.toUTC().toISO()!);
+  const live = items.find(item => item.kind === 'LIVE' && item.startAtUtc > now.toUTC().toISO()!);
+  const free = freeSlots(items, today, zone, 30);
+  return <>
+    <div className="hero"><div><small>AUJOURD’HUI</small><h1>{now.setLocale('fr').toFormat('cccc d LLLL')}</h1></div></div>
+    <div className="dashboard">
+      <section className="metric"><small>PROCHAIN ÉVÉNEMENT</small><h2>{next ? `${DateTime.fromISO(next.startAtUtc).setZone(zone).toFormat('HH:mm')} — ${next.title}` : 'Journée libre'}</h2>{next && <p>dans {Math.max(0, Math.round(DateTime.fromISO(next.startAtUtc).diff(now, 'minutes').minutes))} min</p>}</section>
+      <section className="metric"><small>PROCHAIN LIVE</small><h2>{live ? `${DateTime.fromISO(live.startAtUtc).setZone(zone).toFormat('HH:mm')} — ${live.title}` : 'Aucun live prévu'}</h2>{live && <p>Préparation : {live.metadata?.checklist ?? '0/0'}</p>}</section>
+      <section className="metric wide"><small>TEMPS LIBRE</small>{free.slice(0, 4).map(slot => <p key={slot.startAtUtc}>{DateTime.fromISO(slot.startAtUtc).setZone(zone).toFormat('HH:mm')} → {DateTime.fromISO(slot.endAtUtc).setZone(zone).toFormat('HH:mm')} · {Math.round(slot.minutes)} min</p>)}</section>
+    </div>
+    <h2>Événements du jour</h2>
+    {daily.map(item => <ItemCard key={item.id} item={item} onEdit={onEdit} onReload={onReload} />)}
+  </>;
+}
+
+function SettingsView({ value, reload }: { value: Settings; reload: () => Promise<void> }) {
+  const [settings, setSettings] = useState(value);
+  const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
+  const [device, setDevice] = useState<DeviceState>();
+  const [message, setMessage] = useState('');
+  const [templates, setTemplates] = useState<EventTemplate[]>([]);
+  const [templateName, setTemplateName] = useState('');
+
+  useEffect(() => { void window.damplanner.templates().then((values: EventTemplate[]) => setTemplates(values)); }, []);
+
+  async function action(work: () => Promise<unknown>, success = 'Opération réussie') {
+    try {
+      setMessage('Veuillez patienter…');
+      await work();
+      setMessage(success);
+      await reload();
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function loadCalendars() {
+    const values = await window.damplanner.calendars() as GoogleCalendar[];
+    setCalendars(values);
+  }
+
+  async function addTemplate() {
+    const name = templateName.trim();
+    if (!name) return;
+    const template: EventTemplate = {
+      id: crypto.randomUUID(), name, kind: 'LIVE', durationMinutes: 180, description: '', syncGoogle: true, syncTwitch: true,
+      twitchTitle: null, twitchCategoryId: null, twitchCategoryName: null, bufferBeforeMinutes: settings.liveBufferBefore,
+      bufferAfterMinutes: settings.liveBufferAfter, checklist: ['OBS lancé', 'Micro vérifié', 'Titre vérifié', 'Catégorie Twitch correcte'],
+    };
+    await window.damplanner.saveTemplate(template);
+    setTemplates(await window.damplanner.templates() as EventTemplate[]);
+    setTemplateName('');
+  }
+
+  return <section className="panel settings">
+    <h1>Réglages</h1>
+    <h2>Général</h2>
+    <label>Fuseau horaire<input value={settings.timezone} onChange={event => setSettings({ ...settings, timezone: event.target.value })} /></label>
+    <label>Actualisation automatique<select value={settings.refreshMinutes} onChange={event => setSettings({ ...settings, refreshMinutes: Number(event.target.value) as Settings['refreshMinutes'] })}><option value="0">Désactivée</option><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option></select></label>
+
+    <h2>Google Calendar</h2>
+    <p className="provider-state">{settings.googleConfigured ? settings.googleConnected ? `✓ Connecté${settings.googleAccount ? ` — ${settings.googleAccount}` : ''}` : '○ Configuré, non connecté' : '○ Google non configuré'}</p>
+    <div className="actions">
+      <button onClick={() => action(() => window.damplanner.importGoogle(), 'Credentials Google importés')}>Importer les credentials Desktop</button>
+      <button disabled={!settings.googleConfigured} onClick={() => action(() => window.damplanner.connectGoogle(), 'Google connecté')}>{settings.googleConnected ? 'Reconnecter' : 'Connecter'}</button>
+      <button disabled={!settings.googleConnected} onClick={() => action(() => window.damplanner.disconnectGoogle(), 'Google déconnecté')}>Déconnecter</button>
+      <button disabled={!settings.googleConnected} onClick={() => action(loadCalendars, 'Agendas chargés')}>Charger les agendas</button>
+    </div>
+    {calendars.length > 0 && <>
+      <label>Agenda par défaut<select value={settings.googleDefaultCalendarId} onChange={event => setSettings({ ...settings, googleDefaultCalendarId: event.target.value })}>{calendars.map(calendar => <option value={calendar.id} key={calendar.id}>{calendar.summary}</option>)}</select></label>
+      <fieldset><legend>Agendas de disponibilité et affichage</legend>{calendars.map(calendar => <label key={calendar.id}><input type="checkbox" checked={settings.googleAvailabilityCalendarIds.includes(calendar.id)} onChange={event => setSettings({ ...settings, googleAvailabilityCalendarIds: event.target.checked ? [...settings.googleAvailabilityCalendarIds, calendar.id] : settings.googleAvailabilityCalendarIds.filter(id => id !== calendar.id) })} />{calendar.summary}</label>)}</fieldset>
+    </>}
+
+    <h2>Twitch</h2>
+    <p className="provider-state">{settings.twitchConfigured ? settings.twitchConnected ? `✓ Connecté${settings.twitchAccount ? ` — ${settings.twitchAccount}` : ''}` : '○ Client configuré, non connecté' : '○ Twitch Client ID manquant'}</p>
+    <label>Client ID public<input value={settings.twitchClientId} onChange={event => setSettings({ ...settings, twitchClientId: event.target.value.trim() })} /></label>
+    <div className="actions">
+      <button onClick={() => action(() => window.damplanner.updateSettings({ twitchClientId: settings.twitchClientId }), 'Client ID enregistré')}>Enregistrer le Client ID</button>
+      <button disabled={!settings.twitchClientId} onClick={() => action(async () => setDevice(await window.damplanner.beginTwitch() as DeviceState), 'Code Twitch généré')}>Connecter</button>
+      <button disabled={!settings.twitchConnected} onClick={() => action(() => window.damplanner.disconnectTwitch(), 'Twitch déconnecté')}>Déconnecter</button>
+    </div>
+    {device && <div className="device"><b>Code : {device.userCode}</b><button onClick={() => window.damplanner.openExternal(device.verificationUri)}>Ouvrir Twitch</button><button className="primary" onClick={() => action(() => window.damplanner.completeTwitch(device), 'Twitch connecté')}>J’ai autorisé DamPlanner</button></div>}
+
+    <h2>Disponibilité</h2>
+    <label><input type="checkbox" checked={settings.availabilityLocal} onChange={event => setSettings({ ...settings, availabilityLocal: event.target.checked })} />Événements DamPlanner</label>
+    <label><input type="checkbox" checked={settings.availabilityGoogle} onChange={event => setSettings({ ...settings, availabilityGoogle: event.target.checked })} />Google Calendar</label>
+    <label><input type="checkbox" checked={settings.availabilityTwitch} onChange={event => setSettings({ ...settings, availabilityTwitch: event.target.checked })} />Planning Twitch</label>
+
+    <h2>Temps tampons</h2>
+    <div className="two"><label>Avant LIVE (min)<input type="number" min="0" value={settings.liveBufferBefore} onChange={event => setSettings({ ...settings, liveBufferBefore: Number(event.target.value) })} /></label><label>Après LIVE (min)<input type="number" min="0" value={settings.liveBufferAfter} onChange={event => setSettings({ ...settings, liveBufferAfter: Number(event.target.value) })} /></label></div>
+    <div className="two"><label>Avant perso (min)<input type="number" min="0" value={settings.personalBufferBefore} onChange={event => setSettings({ ...settings, personalBufferBefore: Number(event.target.value) })} /></label><label>Après perso (min)<input type="number" min="0" value={settings.personalBufferAfter} onChange={event => setSettings({ ...settings, personalBufferAfter: Number(event.target.value) })} /></label></div>
+
+    <h2>Modèles</h2>
+    <div className="actions"><input value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Nom du modèle LIVE…" /><button onClick={addTemplate}>Créer un modèle</button></div>
+    {templates.map(template => <div className="template-row" key={template.id}><span><b>{template.name}</b> · {template.durationMinutes} min · {template.kind}</span><button onClick={async () => { await window.damplanner.deleteTemplate(template.id); setTemplates(await window.damplanner.templates() as EventTemplate[]); }}>Supprimer</button></div>)}
+
+    <h2>Windows</h2>
+    <label><input type="checkbox" checked={settings.notificationsEnabled} onChange={event => setSettings({ ...settings, notificationsEnabled: event.target.checked })} />Notifications activées</label>
+    <label>Rappel LIVE (min)<input type="number" min="0" value={settings.liveReminderMinutes} onChange={event => setSettings({ ...settings, liveReminderMinutes: Number(event.target.value) })} /></label>
+    <label>Rappel personnel (min)<input type="number" min="0" value={settings.personalReminderMinutes} onChange={event => setSettings({ ...settings, personalReminderMinutes: Number(event.target.value) })} /></label>
+    <label><input type="checkbox" checked={settings.closeToTray} onChange={event => setSettings({ ...settings, closeToTray: event.target.checked })} />Fermer dans la zone de notification</label>
+    <label><input type="checkbox" checked={settings.launchAtStartup} onChange={event => setSettings({ ...settings, launchAtStartup: event.target.checked })} />Lancer DamPlanner au démarrage de Windows</label>
+
+    <h2>État des connexions</h2>
+    <div className="actions"><button onClick={() => action(async () => { const result = await window.damplanner.testConnections() as { google: { connected: boolean; calendars: number }; twitch: { connected: boolean; schedule: boolean } }; setMessage(`Google : ${result.google.connected ? 'connecté' : 'non connecté'} · ${result.google.calendars} agenda(s) | Twitch : ${result.twitch.connected && result.twitch.schedule ? 'opérationnel' : 'à vérifier'}`); }, '')}>Tester les connexions</button></div>
+
+    <button className="primary" onClick={() => action(() => window.damplanner.updateSettings(settings as unknown as Record<string, unknown>), 'Réglages enregistrés')}>Enregistrer les réglages</button>
+    {message && <p>{message}</p>}
+  </section>;
+}
+
+function App() {
+  const [settings, setSettings] = useState(defaults);
+  const [hub, setHub] = useState<Hub>({ items: [], rows: [], warnings: [], fetchedAt: Date.now(), fromCache: false });
+  const [view, setView] = useState<'today' | 'planning' | 'agenda' | 'form' | 'settings'>('today');
+  const [editing, setEditing] = useState<PlannerEvent>();
+  const [prefill, setPrefill] = useState<Prefill>();
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('Tous');
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+
+  async function load(refresh = false) {
+    try {
+      const value = await window.damplanner.settings() as Settings;
+      const nextSettings = { ...defaults, ...value };
+      setSettings(nextSettings);
+      const now = DateTime.now().setZone(nextSettings.timezone);
+      const data = await window.damplanner.hub(now.minus({ days: 30 }).toUTC().toISO()!, now.plus({ days: 90 }).toUTC().toISO()!, refresh) as Hub;
+      setHub(data);
+      setError('');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoaded(true);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (!settings.refreshMinutes) return;
+    const timer = setInterval(() => void load(true), settings.refreshMinutes * 60_000);
+    return () => clearInterval(timer);
+  }, [settings.refreshMinutes]);
+
+  const shown = useMemo(() => hub.items.filter(item => {
+    const haystack = `${item.title} ${item.description ?? ''} ${item.calendarName ?? ''} ${item.metadata?.categoryName ?? ''}`.toLowerCase();
+    const matchesSearch = haystack.includes(query.toLowerCase());
+    const matchesFilter = filter === 'Tous'
+      || filter === 'LIVE' && item.kind === 'LIVE'
+      || filter === 'Personnel' && item.kind === 'PERSONAL'
+      || filter === 'Brouillons' && item.draft
+      || filter === 'DamPlanner' && item.source === 'DAMPLANNER'
+      || filter === 'Google' && item.source === 'GOOGLE'
+      || filter === 'Twitch' && item.source === 'TWITCH'
+      || filter === 'Erreurs' && [item.google?.status, item.twitch?.status].some(status => status === 'ERROR' || status === 'REAUTH_REQUIRED')
+      || filter === 'Synchronisés' && [item.google?.status, item.twitch?.status].some(status => status === 'SYNCED');
+    return matchesSearch && matchesFilter;
+  }), [hub.items, query, filter]);
+
+  function openEdit(id: string) {
+    setEditing(hub.rows.find(row => row.event.id === id)?.event);
+    setPrefill(undefined);
+    setView('form');
+  }
+
+  async function move(item: CalendarItem, startAtUtc: string, endAtUtc: string) {
+    const row = hub.rows.find(value => value.event.id === item.localEventId);
+    if (!row) return;
+    const input: Record<string, unknown> = { ...row.event, startAtUtc, endAtUtc };
+    for (const key of ['id', 'createdAt', 'updatedAt', 'deletedAt', 'conflictOverrideHash', 'conflictOverrideAt']) delete input[key];
+    const preview = await window.damplanner.preview(input as EventInput, row.event.id) as Preview;
+    if (preview.availability.status !== 'AVAILABLE' && !confirm('Chevauchement détecté. Déplacer quand même ?')) return;
+    await window.damplanner.save(input as EventInput, row.event.id, preview.availability.status === 'AVAILABLE' ? undefined : preview.availability.hash);
+    await load(true);
+  }
+
+  if (loaded && !settings.onboardingDone) return <div className="onboarding"><div><b>◆ DamPlanner</b><h1>Votre planning, en toute simplicité</h1><p>Centralisez DamPlanner, Google Calendar et Twitch.</p><label>Fuseau horaire<input value={settings.timezone} onChange={event => setSettings({ ...settings, timezone: event.target.value })} /></label><div className="actions"><button onClick={async () => { await window.damplanner.updateSettings({ timezone: settings.timezone, onboardingDone: true }); await load(); setView('today'); }}>Configurer plus tard</button><button className="primary" onClick={async () => { await window.damplanner.updateSettings({ timezone: settings.timezone, onboardingDone: true }); await load(); setView('settings'); }}>Configurer Google et Twitch</button></div></div></div>;
+
+  return <>
+    <header><b>◆ DamPlanner</b><nav><button className={view === 'today' ? 'active' : ''} onClick={() => setView('today')}>Aujourd’hui</button><button className={view === 'planning' ? 'active' : ''} onClick={() => setView('planning')}>Planning</button><button className={view === 'agenda' ? 'active' : ''} onClick={() => setView('agenda')}>Agenda</button><button className="primary" onClick={() => { setEditing(undefined); setPrefill(undefined); setView('form'); }}>+ Nouvel événement</button><button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>Réglages</button></nav></header>
+    <main>
+      {error && <p className="error">{error}</p>}
+      {view === 'form' && <EventForm editing={editing} prefill={prefill} settings={settings} onCancel={() => setView('planning')} onDone={async () => { await load(true); setView('planning'); }} />}
+      {view === 'settings' && <SettingsView value={settings} reload={() => load()} />}
+      {view === 'today' && <Today items={shown} zone={settings.timezone} onEdit={openEdit} onReload={() => void load(true)} />}
+      {view === 'agenda' && <Agenda items={shown} zone={settings.timezone} onCreate={value => { setPrefill(value); setEditing(undefined); setView('form'); }} onEdit={openEdit} onMove={move} />}
+      {view === 'planning' && <>
+        <div className="hero"><div><small>PLANNING UNIFIÉ</small><h1>Votre agenda</h1><p>{shown.length} élément(s) · Dernière actualisation : {DateTime.fromMillis(hub.fetchedAt).toFormat('HH:mm')}{hub.fromCache ? ' · données en cache' : ''}</p></div><button onClick={() => load(true)}>Actualiser</button></div>
+        {hub.warnings.map(warning => <p className="warning" key={warning}>⚠ {warning}</p>)}
+        <div className="search"><input aria-label="Rechercher" placeholder="Rechercher…" value={query} onChange={event => setQuery(event.target.value)} /></div>
+        <div className="filters">{['Tous', 'LIVE', 'Personnel', 'Brouillons', 'DamPlanner', 'Google', 'Twitch', 'Synchronisés', 'Erreurs'].map(value => <button className={filter === value ? 'active' : ''} key={value} onClick={() => setFilter(value)}>{value}</button>)}</div>
+        {shown.length === 0 && <section className="empty"><h2>Rien à afficher</h2><p>Modifiez les filtres ou créez un événement.</p></section>}
+        {shown.map(item => <ItemCard key={item.id} item={item} onReload={() => void load(true)} onEdit={openEdit} />)}
+      </>}
+    </main>
+  </>;
+}
+
+createRoot(document.getElementById('root')!).render(<App />);
