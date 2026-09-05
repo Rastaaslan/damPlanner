@@ -28,8 +28,13 @@ export type AppSettings = z.infer<typeof settingsSchema>;
 export class SettingsStore {
   constructor(private readonly path: string) {}
   async get(): Promise<AppSettings> {
-    try { return settingsSchema.parse(JSON.parse(await readFile(this.path, 'utf8'))); }
-    catch { return settingsSchema.parse({}); }
+    try {
+      const raw = JSON.parse(await readFile(this.path, 'utf8')) as Record<string, unknown>;
+      if (!Array.isArray(raw.googleDisplayCalendarIds)) {
+        raw.googleDisplayCalendarIds = Array.isArray(raw.googleAvailabilityCalendarIds) ? raw.googleAvailabilityCalendarIds : ['primary'];
+      }
+      return settingsSchema.parse(raw);
+    } catch { return settingsSchema.parse({}); }
   }
   async update(patch: Partial<AppSettings>): Promise<AppSettings> {
     const value = settingsSchema.parse({ ...(await this.get()), ...patch });
