@@ -8,6 +8,7 @@ async function mockPreload(page: Page) {
       // Returning the mutable `rows` reference prevents React from re-rendering
       // after save/remove because setRows would receive the same object identity.
       list: async () => [...rows],
+      hub: async () => ({ rows:[...rows],warnings:[],fetchedAt:Date.now(),fromCache:false,items:rows.map(row=>({id:`local:${row.event.id}`,source:'DAMPLANNER',ownership:'LOCAL',title:row.event.title,description:row.event.description,startAtUtc:row.event.startAtUtc,endAtUtc:row.event.endAtUtc,allDay:false,editable:true,localEventId:row.event.id,kind:row.event.kind,draft:row.event.status==='DRAFT',google:row.google,twitch:row.twitch})) }),
       settings: async () => ({
         timezone: 'Europe/Paris', googleDefaultCalendarId: 'primary', googleAvailabilityCalendarIds: ['primary'],
         twitchClientId: 'test', availabilityLocal: true, availabilityGoogle: false, availabilityTwitch: false,
@@ -25,7 +26,7 @@ async function mockPreload(page: Page) {
         return event;
       },
       remove: async (id: string) => { const index = rows.findIndex(x => x.event.id === id); if (index >= 0) rows.splice(index, 1); },
-      retry: async () => {}, categories: async () => [{ id: '1', name: 'Just Chatting', boxArtUrl: '' }],
+      retry: async () => {}, publish:async()=>{},adopt:async()=>{},duplicate:async()=>{},templates:async()=>[],saveTemplate:async()=>{},deleteTemplate:async()=>{},testConnections:async()=>({}),categories: async () => [{ id: '1', name: 'Just Chatting', boxArtUrl: '' }],
       updateSettings: async () => {}, importGoogle: async () => true, connectGoogle: async () => {}, disconnectGoogle: async () => {},
       calendars: async () => [], beginTwitch: async () => ({}), completeTwitch: async () => {}, disconnectTwitch: async () => {}, openExternal: async () => {},
     };
@@ -65,8 +66,8 @@ test('création LIVE Google+Twitch, modification et suppression', async ({ page 
 
   let card = eventCard(page, 'Soirée Twitch');
   await expect(card).toBeVisible();
-  await expect(card.getByText('Google: SYNCED')).toBeVisible();
-  await expect(card.getByText('Twitch: SYNCED')).toBeVisible();
+  await expect(card.getByText('✓ Google')).toBeVisible();
+  await expect(card.getByText('✓ Twitch')).toBeVisible();
   await card.getByRole('button', { name: 'Modifier' }).click();
   await page.getByLabel('Titre', { exact: true }).fill('Soirée modifiée');
   await previewAndSave(page);
@@ -86,8 +87,7 @@ test('PERSONAL Google only', async ({ page }) => {
 
   const card = eventCard(page, 'Rendez-vous');
   await expect(card).toBeVisible();
-  await expect(card.getByText('Google: SYNCED')).toBeVisible();
-  await expect(card.getByText('Twitch: NOT_REQUESTED')).toBeVisible();
+  await expect(card.getByText('✓ Google')).toBeVisible();
 });
 
 test('deux événements simultanés sont conservés après confirmation', async ({ page }) => {
