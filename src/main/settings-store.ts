@@ -5,6 +5,7 @@ import { z } from 'zod';
 export const settingsSchema = z.object({
   timezone: z.string().default('Europe/Paris'),
   googleDefaultCalendarId: z.string().default('primary'),
+  googleDisplayCalendarIds: z.array(z.string()).default(['primary']),
   googleAvailabilityCalendarIds: z.array(z.string()).default(['primary']),
   twitchClientId: z.string().default(''),
   availabilityLocal: z.boolean().default(true),
