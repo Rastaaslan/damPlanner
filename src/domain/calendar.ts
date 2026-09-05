@@ -21,6 +21,9 @@ export interface CalendarItem {
   calendarName?: string;
   kind?: 'LIVE' | 'PERSONAL';
   draft?: boolean;
+  lifecycleState?: PlannerEvent['lifecycleState'];
+  actualStartAt?: string | null;
+  actualEndAt?: string | null;
   google?: EventPublication;
   twitch?: EventPublication;
   metadata?: Record<string, string | undefined>;
@@ -52,6 +55,9 @@ export function mergeCalendarItems(rows: PlannerRow[], google: RemoteSlot[], twi
     localEventId: event.id,
     kind: event.kind,
     draft: event.status === 'DRAFT',
+    lifecycleState: event.lifecycleState,
+    actualStartAt: event.actualStartAt,
+    actualEndAt: event.actualEndAt,
     google: googlePublication,
     twitch: twitchPublication,
     metadata: {

@@ -23,6 +23,7 @@ const api = {
   checkRoutine:(eventId:string,stepId:string,done:boolean)=>invoke('routines:check',{eventId,stepId,done}),
   resetRoutine:(eventId:string)=>invoke('routines:reset',eventId),
   setLifecycle:(eventId:string,state:string)=>invoke('lifecycle:set',{eventId,state}),
+  completeLive:(eventId:string,actualEndAt:string,mood:string|null,note:string)=>invoke('cockpit:complete-live',{eventId,actualEndAt,mood,note}),
   savePostLive:(eventId:string,mood:string|null,note:string)=>invoke('postlive:save',{eventId,mood,note}),
   saveParticipant:(value:unknown)=>invoke('participants:save',value),
   saveTag:(value:unknown)=>invoke('tags:save',value),
