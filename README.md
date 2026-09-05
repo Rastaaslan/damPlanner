@@ -21,3 +21,10 @@ Les comptes réels sont optionnels. Aucun secret ne doit être placé dans Git :
 - adaptateurs de production Google Calendar REST et Twitch Helix, avec OAuth Desktop loopback/PKCE et Device Code Flow. Les fakes ne sont sélectionnés qu'avec `DAMPLANNER_MOCK_PROVIDERS=1`.
 
 Les événements récurrents, OBS, TouchPortal, chat, statistiques, cloud, mobile et synchronisation bidirectionnelle générale sont hors périmètre.
+
+## Agenda & Daily Hub
+
+DamPlanner propose désormais les vues **Aujourd'hui**, **Planning** et **Agenda** (semaine
+et mois) sur une source unifiée locale/Google/Twitch, avec lecture seule stricte des éléments
+externes, déduplication, adoption Google explicite, cache hors connexion et brouillons.
+Voir [docs/AGENDA.md](docs/AGENDA.md) pour les garanties de propriété et limitations.
