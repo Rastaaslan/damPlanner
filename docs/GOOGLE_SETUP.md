@@ -7,3 +7,11 @@
 5. La connexion ouvre le navigateur système et reçoit le code sur un callback loopback éphémère `127.0.0.1` avec PKCE/state.
 
 Choisir ensuite l'agenda de publication par défaut et les agendas de disponibilité. Déconnexion supprime les jetons locaux. Valider create/get/update/delete et révocation avec le smoke test ; les tests automatisés n'utilisent que le fake.
+
+## Événements externes
+
+Les agendas sélectionnés sont lus sur une fenêtre de 30 jours passés à 90 jours futurs.
+`singleEvents=true` développe les occurrences récurrentes et les dates sans heure sont
+traitées comme événements toute la journée avec une fin exclusive. Les événements ne sont
+modifiables qu'après l'action explicite « Gérer dans DamPlanner ». Une erreur Free/Busy sur
+un agenda public est isolée et n'annule pas les résultats des autres agendas.
